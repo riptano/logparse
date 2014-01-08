@@ -1,50 +1,52 @@
-#!/usr/bin/python
-# Log parsing proof of concept
-
-import sys
-import fileinput
 import re
-from datetime import datetime
-from rules import line_pattern, line_fields, date_format, message_rules
+import inspect
+from collections import defaultdict
 
-class SystemLogParser:
-	def apply_rules(self, line):
-		if line['source_file'] in message_rules:
-			for rule in message_rules[line['source_file']]:
-				submatch = rule['regex'].match(line['message'])
-				if submatch is not None:
-					if 'fields' in rule:
-						fields = dict(zip(rule['fields'], submatch.groups()))
-						if 'field_parsers' in rule:
-							for name, value in fields.iteritems():
-								if name in rule['field_parsers']:
-									fields[name] = rule['field_parsers'][name](value)
-						line.update(fields)
-					else:
-						fields = None
-					if 'action' in rule:
-						if callable(rule['action']):
-							rule['action'](self, line, fields)
-						elif rule['action'] == 'update':
-							self.sessions[-1].update(fields)
-					if 'index_name' in rule:
-						if rule['index_name'] not in self.sessions[-1]:
-							self.sessions[-1][rule['index_name']] = []
-						self.sessions[-1][rule['index_name']].append(line)
-
-	def __init__(self, files=None):
-		if files is None:
-			files = sys.argv[1:]
-		self.sessions = [{}]
-		self.lines = []
+class Rule(object):
+	rule_group = None
+	rule_groups = ()
+	regex = None
+	
+	def __init__(self, ruleset, target):
+		self.regex = re.compile(self.regex)
+		self.ruleset = ruleset
+		self.target = target
+		if self.rule_groups == () and self.rule_group is not None:
+			self.rule_groups = (self.rule_group,)
+			
+	def action(self, fields):
+		pass
 		
-		fi = fileinput.FileInput(files)
-		for line in fi:
-			match = line_pattern.match(line)
-			if match is not None:
-				line = dict(zip(line_fields, match.groups()))
-				line['date'] = datetime.strptime(line['date'], date_format)
-				line['log_file'] = fi.filename()
-				line['log_line'] = fi.filelineno()
-				self.apply_rules(line)
-				self.lines.append(line)
+	def parse(self, name, value):
+		return getattr(self, 'parse_' + name, lambda x: x)(value)
+		
+	def apply(self, input, fields=None):
+		match = self.regex.match(input)
+		if match is not None:
+			if fields is None:
+				fields = {}
+			fields.update({k: self.parse(k, v) for k, v in match.groupdict().iteritems()})
+			self.action(fields)
+			return True
+		else:
+			return False
+
+
+class RuleSet(object):
+	def __init__(self, target):
+		self.target = target
+		self.all_rules = []
+		self.rules_by_group = defaultdict(list)
+		for child_name in dir(self):
+			child = getattr(self, child_name)
+			if inspect.isclass(child) and issubclass(child, Rule):
+				rule = child(self, target)
+				self.all_rules.append(rule)
+				for rule_group in rule.rule_groups:
+					self.rules_by_group[rule_group].append(rule)
+		
+	def apply(self, input, group=None, fields=None):
+		for rule in self.all_rules if group is None else self.rules_by_group[group]:
+			if rule.apply(input, fields):
+				return True
+		return False

@@ -1,99 +1,127 @@
-def new_session(log, line, fields):
-	if log.sessions == [{}]:
-		log.sessions == []
-	log.sessions.append({
-		'start_date': line['date'],
-	})
+from fileinput import FileInput
+from datetime import datetime
+from baserules import Rule, RuleSet
 
-def save_flush(log, line, fields):
-	if 'flushes' not in log.sessions[-1]:
-		log.sessions[-1]['flushes'] = []
-	if save_flush.current_flush is None:
-		save_flush.current_flush = {}
-		save_flush.current_flush.update(fields)
-	else:
-		save_flush.current_flush.update(fields)
-		log.sessions[-1]['flushes'].append(save_flush.current_flush)
-		save_flush.current_flush = None
-save_flush.current_flush = None
+class LineRules(RuleSet):
+	class LogLine(Rule):
+		def __init__(self, ruleset, target):
+			super(LineRules.LogLine, self).__init__(ruleset, target)
+			self.message_rules = MessageRules(target)
+		regex = r'(?P<level>.{5}) \[(?P<thread_name>[A-Za-z]*):?(?P<thread_id>[0-9]*)\] (?P<date>.{10} .{12}) (?P<source_file>[^ ]*) \(line (?P<source_lineno>[0-9]*)\) (?P<message>.*)'
+		@staticmethod
+		def parse_date(date):
+			return datetime.strptime(date, '%Y-%m-%d %H:%M:%S,%f')
+		@staticmethod
+		def parse_thread_id(thread_id):
+			if thread_id == '':
+				return None
+			else: 
+				return long(thread_id)
+		parse_source_lineno = long
+		def action(self, fields):
+			self.message_rules.apply(fields['message'], fields['source_file'], fields)
+			self.target.append_line(fields)
 
-line_pattern = r'(.{5}) \[([A-Za-z]*):?([0-9]*)\] (.{10} .{12}) ([^ ]*) \(line ([0-9]*)\) (.*)'
-line_fields = ['level', 'thread_name', 'thread_id', 'date', 'source_file', 'source_line', 'message']
-date_format = '%Y-%m-%d %H:%M:%S,%f'
 
-message_rules = {
-	'CassandraDaemon.java': [
-		{
-			'regex': r'Logging initialized',
-			'action': new_session
-		},
-		{
-			'regex': r'JVM vendor/version: (.*)',
-			'fields': ['jvm'],
-			'action': 'update'
-		},
-		{
-			'regex': r'Heap size: ([0-9]*)/([0-9]*)',
-			'fields': ['heap_used', 'total_heap'],
-			'action': 'update'
-		},
-		{
-			'regex': r'Classpath: (.*)',
-			'fields': ['classpath'],
-			'field_parsers': { 'classpath': lambda cp: cp.split(':') },
-			'action': 'update'
-		}
-	],
-	'DseDaemon.java': [
-		{
-			'regex': r'([A-Za-z]*) version: (.*)',
-			'fields': ['component', 'version'],
-			'index_name': 'versions'
-		}
-	],
-	'StorageService.java': [
-		{
-			'regex': r'([A-Za-z ]*) versions?: (.*)',
-			'fields': ['component', 'version'],
-			'index_name': 'versions'
-		}
-	],
-	'GCInspector.java': [
-		{
-			# Heap is 0.7648984666406755 full...
-			'regex': r'Heap is ([0-9.]*) full.*',
-			'fields': ['percent_full'],
-			'field_parsers': { 'percent_full': float },
-			'index_name': 'heap_warnings'
-		},
-		{
-			# GC for ParNew: 1020 ms for 2 collections, 172365056 used; max is 8506048512
-			'regex': r'GC for ([A-Za-z]*): ([0-9]*) ms for ([0-9]*) collections, ([0-9]*) used; max is ([0-9]*)',
-			'fields': ['type', 'duration', 'collections', 'used', 'max'],
-			'field_parsers': { 'duration': long, 'collections': long, 'used': long, 'max': long },
-			'index_name': 'garbage_collections'
-		}
-	],
-	'Memtable.java': [
-		{ 
-			# Writing Memtable-DeviceUDID@810851995(1151990/2097152 serialized/live bytes, 38951 ops)
-			'regex': r'Writing Memtable-([^@]*)@([0-9]*)\(([0-9]*)/([0-9]*) serialized/live bytes, ([0-9]*) ops\)',
-			'fields': ['column_family', 'address', 'serialized_bytes', 'live_bytes', 'ops'],
-			'action': save_flush
-		},
-		{
-			#Completed flushing /var/lib/cassandra/data/Mobile/OfferReservation/Mobile-OfferReservation-ic-29240-Data.db (32373 bytes) for commitlog position ReplayPosition(segmentId=1381283075980, position=3580)
-			'regex': r'Completed flushing ([^ ]*) \(([0-9]*) bytes\) for commitlog position ReplayPosition\(segmentId=([0-9]*), position=([0-9]*)\)',
-			'fields': ['filename', 'file_size', 'segment_id', 'position'],
-			'action': save_flush
-		}
-	]
-}
+class MessageRules(RuleSet):
 
-# pre-compile regexes
-import re
+	class LoggingInitialized(Rule):
+		rule_group = 'CassandraDaemon.java'
+		regex = r'Logging initialized'
+		def action(self, fields):
+			self.target.new_session(fields)
+	
+	class JVMVendor(Rule):
+		rule_group = 'CassandraDaemon.java'
+		regex = r'JVM vendor/version: (?P<jvm>.*)'
+		def action(self, fields):
+			self.target.update_session(fields)
+		
+	class HeapSize(Rule):
+		rule_group = 'CassandraDaemon.java'
+		regex = r'Heap size: (?P<heap_used>[0-9]*)/(?P<total_heap>[0-9]*)'
+		parse_heap_used = long
+		parse_total_heap = long				
+		def action(self, fields):
+			self.target.update_session(fields)
+		
+	class Classpath(Rule):
+		rule_group = 'CassandraDaemon.java'
+		regex = r'Classpath: (?P<classpath>.*)'
+		@staticmethod
+		def parse_classpath(cp):
+			return cp.split(':')
+		def action(self, fields):
+			self.target.update_session(fields)
+			
+	class Version(Rule):
+		rule_groups = ('CassandraDaemon.java', 'StorageService.java')
+		regex = r'(?P<component>[A-Za-z ]*) versions?: (?P<version>.*)'
+		def action(self, fields):
+			self.target.update_session(fields, 'versions')
+		
+	class HeapFull(Rule):
+		rule_group = 'GCInspector.java'
+		regex = r'Heap is (?P<percent_full>[0-9.]*) full.*'
+		parse_percent_full = float
+		def action(self, fields):
+			self.target.update_session(fields, 'heap_full')
+	
+	class GarbageCollection(Rule):
+		rule_group = 'GCInspector.java'
+		regex = r'GC for (?P<type>[A-Za-z]*): (?P<duration>[0-9]*) ms for (?P<collections>[0-9]*) collections, (?P<used>[0-9]*) used; max is (?P<max>[0-9]*)'
+		parse_duration = long
+		parse_collections = long
+		parse_used = long
+		parse_max = long
+		def action(self, fields):
+			self.target.update_session(fields, 'garbage_collections')
+		
+	class BeginFlush(Rule):
+		rule_group = 'Memtable.java'
+		regex = r'Writing Memtable-(?P<column_family>[^@]*)@(?P<address>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)'
+		def action(self, fields):
+			self.target.begin_flush(fields)
+			
+	class EndFlush(Rule):
+		rule_group = 'Memtable.java'
+		regex = r'Completed flushing (?P<filename>[^ ]*) \((?P<file_size>[0-9]*) bytes\) for commitlog position ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)'
+		def action(self, fields):
+			self.target.end_flush(fields)
+			
 
-line_pattern = re.compile(line_pattern)
-for rule_group in message_rules.values():
-	for rule in rule_group:
-		rule['regex'] = re.compile(rule['regex'])
+class SystemLog(object):
+	def __init__(self, files=None):
+		self.lines = []
+		self.sessions = [{}]
+		self.threads = {}
+		line_rules = LineRules(self)
+		fi = FileInput(files)
+		for line in fi:
+			line_rules.apply(line, fields=dict(log_file=fi.filename(), log_lineno=fi.filelineno()))
+			
+	def append_line(self, fields):
+		self.lines.append(fields)
+
+	def new_session(self, fields):
+		if self.sessions != [{}]:
+			self.sessions.append({})
+		self.sessions[-1]['start_date'] = fields['date']
+		
+	def update_session(self, fields, group=None):
+		if group is None:
+			self.sessions[-1].update(fields)
+		elif group in self.sessions[-1]:
+			self.sessions[-1][group].append(fields)
+		else:
+			self.sessions[-1][group] = [fields]
+		
+	def begin_flush(self, fields):
+		self.current_flush = fields
+
+	def end_flush(self, fields):
+		if self.current_flush is None:
+			self.current_flush = {}
+		self.current_flush.update(fields)
+		self.append_session('flushes', self.current_flush)
+		self.current_flush = None
