@@ -123,5 +123,5 @@ class SystemLog(object):
 		if self.current_flush is None:
 			self.current_flush = {}
 		self.current_flush.update(fields)
-		self.append_session('flushes', self.current_flush)
+		self.update_session(self.current_flush, 'memtable_flushes')
 		self.current_flush = None
