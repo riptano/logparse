@@ -74,7 +74,7 @@ class SystemLog:
         self.field_stack[key].append(fields)
         
     def pop_fields(self, key):
-		return {} if self.field_stack[key] else self.field_stack[key].pop()
+		return self.field_stack[key].pop() if self.field_stack[key] else {}
 
 
     @group(line_rules)
@@ -173,10 +173,10 @@ class SystemLog:
         self.append_session('garbage_collections', message_fields)
 
     @group(message_rules['Memtable'])
-    @regex(r'Writing Memtable-(?P<column_family>[^@]*)@(?P<address>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)')
+    @regex(r'Writing Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)')
     def begin_flush(self, message_fields, line_fields):
         message_fields['begin_date'] = line_fields['date']
-        convert(message_fields, ('address', 'serialized_bytes', 'live_bytes', 'ops'), int)
+        convert(message_fields, ('hash_code', 'serialized_bytes', 'live_bytes', 'ops'), int)
         self.push_fields(line_fields['thread'], message_fields)
     
     @group(message_rules['Memtable'])
@@ -204,3 +204,14 @@ class SystemLog:
                 lambda value: int(value.replace(',', '')))
         message_fields.update(self.pop_fields(line_fields['thread']))
         self.append_session('compactions', message_fields)
+
+    @group(message_rules['CompactionController'])
+    @regex(r'Compacting large row (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<row_key>[0-9]*) \((?P<row_size>[0-9]*) bytes\) incrementally')
+    def incremental_compaction(self, message_fields, line_fields):
+        message_fields['row_size'] = int(message_fields['row_size'])
+        message_fields['date'] = line_fields['date']
+        compaction = self.pop_fields(line_fields['thread'])
+        if 'incremental_rows' not in compaction:
+            compaction['incremental_rows'] = []
+        compaction['incremental_rows'].append(message_fields)
+        self.push_fields(line_fields['thread'], compaction)
