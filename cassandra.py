@@ -50,7 +50,8 @@ class SystemLog:
         self.lines = []
         self.sessions = [{}]
         self.field_stack = collections.defaultdict(list)
-        self.unrecognized = []
+        self.unknown_lines = []
+        self.unknown_messages = []
         fi = fileinput.FileInput(files)
         for line in fi:
             for rule in self.line_rules:
@@ -58,7 +59,7 @@ class SystemLog:
                 if line_fields is not None:
                     break
             else:
-            	print line
+                self.unknown_lines.append(line)
                     
     def update_session(self, key, fields):
         if key not in self.sessions[-1]:
@@ -89,7 +90,7 @@ class SystemLog:
             if rule(self, line_fields['message'], line_fields):
                 break
         else:
-        	self.unrecognized.append(line_fields)
+            self.unknown_messages.append(line_fields)
         if line_fields['level'] == 'ERROR':
         	self.append_session('errors', line_fields)
         elif line_fields['level'] == 'WARN':
