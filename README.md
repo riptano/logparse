@@ -1,6 +1,8 @@
 # Cassandra system.log parser
 
-This is a rule-based Cassandra `system.log` parser.  It 
+This is a rule-based Cassandra `system.log` parser.  It takes a standard `system.log`
+file and creates a dictionary containing categorized information that can be queried
+and summarized using other tools.
 
 ## Using the parser
 
@@ -12,38 +14,41 @@ import cassandra
 log = cassandra.SystemLog('system.log')
 ```
 
-If no filenames are specified, SystemLog will default to using the filenames specified
-on the command line, and if none are specified, it will attempt to parse stdin.
+If no filenames are specified, SystemLog will use the filenames specified on the command
+line, and if none are specified there, it will attempt to parse stdin.
 
-Once the parser finishes parsing the log file, the log object will contain a few
-dictionaries.  `lines` is a list of dictionaries containing all of the log lines, broken 
+Once the parser finishes parsing the log file, the log object will contain some
+dictionaries:
+
+- `lines` is a list of dictionaries containing all of the log lines, broken 
 out into fields.
 
-`sessions` is a list of dictionaries separating the log into individual sessions (restarts).
-Each session contains various keys containing various categories of information:
-
-- 'environment': environmental information such as jvm, heap size, and classpath
-- 'version': versions of all components included in DSE/Cassandra
-- 'garbage_collections': garbage collection pauses
-- 'heap_warnings': heap full warnings
-- 'flushes': memtable flushes with various statistics
-- 'compactions': compactions with various statistics
+- `sessions` is a list of dictionaries separating the log into individual sessions (restarts).
+Each session is an individual dictionary containing various keys for different categories
+of information:
+  - `environment`: environmental information such as jvm, heap size, and classpath
+  - `versions`: versions of all components included in DSE/Cassandra
+  - `garbage_collections`: garbage collection pauses
+  - `heap_warnings`: heap full warnings
+  - `flushes`: memtable flushes with various statistics
+  - `compactions`: compactions with various statistics
 
 ## Examples
 
 The `example.ipynb` file contains an IPython notebook containing several examples of
 analysis that can be done on a log file once it has been parsed.  This includes graphing
-and histogramming garbage collections, compactions, and flushes, querying version and
-environmental information.
+and histogramming garbage collections, compactions, flushes, and exception frequency, 
+as well as querying version and environmental information.
 
-To run the examples, you need IPython, pandas, and associated dependencies.  Please
-refer to [Diving into Open Data with IPython Notebook & Pandas](http://nbviewer.ipython.org/github/jvns/talks/blob/master/pyconca2013/pistes-cyclables.ipynb)
-for installation instructions and a basic overview of IPython and pandas.
+To run the examples, you need IPython, pandas, and their associated dependencies.
+Refer to [Diving into Open Data with IPython Notebook & Pandas](http://nbviewer.ipython.org/github/jvns/talks/blob/master/pyconca2013/pistes-cyclables.ipynb)
+for installation instructions and a basic overview of [IPython](http://ipython.org/) and
+[pandas](http://pandas.pydata.org/).
 
 ## Defining new rules
 
-Rules can be added to the SystemLog class by defining action method with a `@group` and
-`@regex` decorator.  Here are a few example rules:
+Rules can be added to the SystemLog class by defining a new action method with `@group` and
+`@regex` decorators.  Here are a few examples:
 
 ```
 @group(line_rules)
@@ -73,19 +78,21 @@ def garbage_collection(self, message_fields, line_fields):
     self.append_session('garbage_collections', message_fields)
 ```
 
-The `@group` decorator specifies the group in which the rule should be registered.
+The `@group` decorator specifies the group to which the rule should be registered.
 
-- Rules that parse an entire line should be registered in the `line_rules` list.
+- Rules that parse an entire line should be registered in the `line_rules` group.
 - Rules that parse specific messages should be registered in the appropriate 
-`message_rules['ClassName']` list.  ClassName should be the name of the class that logs
+`message_rules['ClassName']` group.  ClassName should be the name of the class that logs
 a particular message.
 
-The `@regex` decorator takes a regular expression string containing named capture groups.
+The `@regex` decorator takes a regular expression string containing named capture groups
+(e.g., `(?P<number_field>[0-9]*)` will capture a string of digits into number_field).
+
 The regular expression will be evaluated against each line or message, and if it matches,
 the action method will be called with a dictionary containing the captured fields.
 
-Please refer to the [Regular Expression HOWTO](http://docs.python.org/2/howto/regex.html)
+Refer to the [Regular Expression HOWTO](http://docs.python.org/2/howto/regex.html)
 for more information on regular expressions.
 
-In the action method, you should do any desired field manipulation such as type 
+In the action method, you can perform any desired field manipulation such as type 
 conversions, then save the data to the appropriate location within the SystemLog class.
