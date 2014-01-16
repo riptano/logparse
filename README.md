@@ -40,10 +40,26 @@ analysis that can be done on a log file once it has been parsed.  This includes 
 and histogramming garbage collections, compactions, flushes, and exception frequency, 
 as well as querying version and environmental information.
 
-To run the examples, you need IPython, pandas, and their associated dependencies.
+To run the examples, you need IPython, pandas, and their associated dependencies via pip:
+
+```
+pip install ipython tornado pyzmq
+pip install pandas
+```
+
+Once installed, run IPython from the project directory:
+
+```
+ipython notebook --pylab inline
+```
+
+This will start a web server and should open a tab in your browser for IPython. If the
+tab does not automatically open or you accidentally close it, go to http://localhost:8888.
+From the list of available projects, select examples, and check out the demos there.
+
 Refer to [Diving into Open Data with IPython Notebook & Pandas](http://nbviewer.ipython.org/github/jvns/talks/blob/master/pyconca2013/pistes-cyclables.ipynb)
-for installation instructions and a basic overview of [IPython](http://ipython.org/) and
-[pandas](http://pandas.pydata.org/).
+for a quick overview of using IPython and pandas together.  More information can be found
+on the [IPython](http://ipython.org/) and [pandas](http://pandas.pydata.org/) web pages.
 
 ## Defining new rules
 
