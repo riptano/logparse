@@ -168,12 +168,24 @@ class SystemLog:
         convert(message_fields, ('duration', 'collections', 'used', 'max'), int)
         self.append_session('garbage_collections', message_fields)
 
+    #Enqueuing flush of Memtable-hints@424700025(76/760 serialized/live bytes, 4 ops)
+    @group(message_rules['ColumnFamilyStore'])
+    @regex(r'Enqueuing flush of Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)')
+    def begin_flush(self, message_fields, line_fields):
+        message_fields['enqueue_date'] = line_fields['date']
+        convert(message_fields, ('hash_code', 'serialized_bytes', 'live_bytes', 'ops'), int)
+        self.saved_fields[message_fields['column_family'], message_fields['hash_code']] = message_fields
+
     @group(message_rules['Memtable'])
     @regex(r'Writing Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)')
     def begin_flush(self, message_fields, line_fields):
-        message_fields['begin_date'] = line_fields['date']
         convert(message_fields, ('hash_code', 'serialized_bytes', 'live_bytes', 'ops'), int)
-        self.saved_fields[line_fields['thread']] = message_fields
+        enqueue_fields = self.saved_fields.get((message_fields['column_family'], message_fields['hash_code']), {})
+        message_fields['enqueue_date'] = enqueue_fields.get('enqueue_date')
+        message_fields['begin_date'] = line_fields['date']
+        if line_fields['thread'] not in self.saved_fields:
+            self.saved_fields[line_fields['thread']] = {}
+        self.saved_fields[line_fields['thread']].update(message_fields)
 
     @group(message_rules['Memtable'])
     @regex(r'Completed flushing (?P<filename>[^ ]*) \((?P<file_size>[0-9]*) bytes\) for commitlog position ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)')
@@ -281,14 +293,18 @@ class SystemLog:
         self.append_session('repair_sessions', repair_session)
         del self.saved_fields[message_fields['session_id']]
 
-    # Finished streaming session f1d68c00-76b3-11e3-8f7a-23cd0106a6f4 from /10.66.17.92
     @group(message_rules['StreamInSession'])
     @regex(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<node>.*)')
     def finished_streaming(self, message_fields, line_fields):
         message_fields['end_date'] = line_fields['date']
         self.append_session('streaming_sessions', message_fields)
 
-    # Opening /data/cassandra/mca/ItemThreshold_IDX/snapshots/9d5dda00-74d0-11e3-b617-713e1176b51e/mca-ItemThreshold_IDX-ic-53 (91718 bytes)
+    @group(message_rules['StreamReplyVerbHandler'])
+    @regex(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<node>.*)')
+    def finished_streaming(self, message_fields, line_fields):
+        message_fields['date'] = line_fields['date']
+        self.append_session('sstables_sent', message_fields)
+
     @group(message_rules['SSTableReader'])
     @regex(r'Opening (?P<sstable_name>[^ ]*) \((?P<bytes>[0-9]*) bytes\)')
     def finished_streaming(self, message_fields, line_fields):
@@ -296,7 +312,6 @@ class SystemLog:
         message_fields['bytes'] = int(message_fields['bytes'])
         self.append_session('opened_sstables', message_fields)
 
-    #Pool Name                    Active   Pending      Completed   Blocked  All Time Blocked
     @group(message_rules['StatusLogger'])
     @regex(r'Pool Name *Active *Pending *Completed *Blocked *All Time Blocked')
     def pool_header(self, message_fields, line_fields):
@@ -322,16 +337,17 @@ class SystemLog:
     @regex(r'(?P<type>[A-Za-z]*Cache(?! Type)) *(?P<size>[0-9]*) *(?P<capacity>[0-9]*) *(?P<keys_to_save>[^ ]*) *(?P<provider>[A-Za-z_.$]*)')
     def cache_info(self, message_fields, line_fields):
         convert(message_fields, ('size', 'capacity'), int)
-        self.sessions[-1]['status'][-1]['caches'].append(message_fields)
+        if 'status' in self.sessions[-1]:
+            self.sessions[-1]['status'][-1]['caches'].append(message_fields)
 
     @group(message_rules['StatusLogger'])
     @regex(r'ColumnFamily *Memtable ops,data')
     def memtable_header(self, message_fields, line_fields):
         pass
 
-    #HiveMetaStore.MetaStore                   0,0
     @group(message_rules['StatusLogger'])
     @regex(r'(?P<keyspace>[^.]*)\.(?P<column_family>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)')
     def memtable_info(self, message_fields, line_fields):
         convert(message_fields, ('ops', 'data'), int)
-        self.sessions[-1]['status'][-1]['memtables'].append(message_fields)
+        if 'status' in self.sessions[-1]:
+            self.sessions[-1]['status'][-1]['memtables'].append(message_fields)
