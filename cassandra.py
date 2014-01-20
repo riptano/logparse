@@ -18,9 +18,9 @@ class regex:
             if match:
                 fields = match.groupdict()
                 action(log, fields, extra_fields)
-                return fields
+                return True
             else:
-                return None
+                return False
         return rule
 
 
@@ -38,7 +38,10 @@ class group:
 def convert(dictionary, field_list, func):
     'Convenience function to convert a list of fields using a function.'
     for field in field_list:
-        dictionary[field] = func(dictionary[field])
+        try:
+            dictionary[field] = func(dictionary[field])
+        except:
+            pass
 
 
 class SystemLog:
@@ -55,8 +58,7 @@ class SystemLog:
         fi = fileinput.FileInput(files)
         for line in fi:
             for rule in self.line_rules:
-                line_fields = rule(self, line.strip(), extra_fields=dict(log_file=fi.filename(), log_lineno=fi.filelineno()))
-                if line_fields is not None:
+                if rule(self, line.strip(), extra_fields=dict(log_file=fi.filename(), log_lineno=fi.filelineno())):
                     break
             else:
                 self.unknown_lines.append(line)
@@ -156,7 +158,7 @@ class SystemLog:
     @regex(r'Heap is (?P<percent_full>[0-9.]*) full.*')
     def heap_full(self, message_fields, line_fields):
         message_fields['date'] = line_fields['date']
-        message_fields['percent_full'] = float(message_fields['percent_full'])
+        message_fields['percent_full'] = float(message_fields['percent_full']) * 100
         self.append_session('heap_warnings', message_fields)
 
     @group(message_rules['GCInspector'])
@@ -275,5 +277,61 @@ class SystemLog:
     def end_repair(self, message_fields, line_fields):
         repair_session = self.saved_fields[message_fields['session_id']]
         repair_session['end_date'] = line_fields['date']
+        repair_session['merkle_requests'] = repair_session['merkle_requests'].values()
         self.append_session('repair_sessions', repair_session)
         del self.saved_fields[message_fields['session_id']]
+
+    # Finished streaming session f1d68c00-76b3-11e3-8f7a-23cd0106a6f4 from /10.66.17.92
+    @group(message_rules['StreamInSession'])
+    @regex(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<node>.*)')
+    def finished_streaming(self, message_fields, line_fields):
+        message_fields['end_date'] = line_fields['date']
+        self.append_session('streaming_sessions', message_fields)
+
+    # Opening /data/cassandra/mca/ItemThreshold_IDX/snapshots/9d5dda00-74d0-11e3-b617-713e1176b51e/mca-ItemThreshold_IDX-ic-53 (91718 bytes)
+    @group(message_rules['SSTableReader'])
+    @regex(r'Opening (?P<sstable_name>[^ ]*) \((?P<bytes>[0-9]*) bytes\)')
+    def finished_streaming(self, message_fields, line_fields):
+        message_fields['date'] = line_fields['date']
+        message_fields['bytes'] = int(message_fields['bytes'])
+        self.append_session('opened_sstables', message_fields)
+
+    #Pool Name                    Active   Pending      Completed   Blocked  All Time Blocked
+    @group(message_rules['StatusLogger'])
+    @regex(r'Pool Name *Active *Pending *Completed *Blocked *All Time Blocked')
+    def pool_header(self, message_fields, line_fields):
+        self.append_session('status', {
+            'date': line_fields['date'],
+            'thread_pool': [],
+            'caches': [],
+            'memtables': []
+        })
+
+    @group(message_rules['StatusLogger'])
+    @regex(r'(?P<pool_name>[A-Za-z_]+) +(?P<active>[0-9]+) +(?P<pending>[0-9]+) +(?P<completed>[0-9]+) +(?P<blocked>[0-9]+) +(?P<all_time_blocked>[0-9]+)')
+    def pool_info(self, message_fields, line_fields):
+        convert(message_fields, ('active', 'pending', 'completed', 'blocked', 'all_time_blocked'), int)
+        self.sessions[-1]['status'][-1]['thread_pool'].append(message_fields)
+
+    @group(message_rules['StatusLogger'])
+    @regex(r'Cache Type *Size *Capacity *KeysToSave *Provider')
+    def cache_header(self, message_fields, line_fields):
+        pass
+
+    @group(message_rules['StatusLogger'])
+    @regex(r'(?P<type>[A-Za-z]*Cache(?! Type)) *(?P<size>[0-9]*) *(?P<capacity>[0-9]*) *(?P<keys_to_save>[^ ]*) *(?P<provider>[A-Za-z_.$]*)')
+    def cache_info(self, message_fields, line_fields):
+        convert(message_fields, ('size', 'capacity'), int)
+        self.sessions[-1]['status'][-1]['caches'].append(message_fields)
+
+    @group(message_rules['StatusLogger'])
+    @regex(r'ColumnFamily *Memtable ops,data')
+    def memtable_header(self, message_fields, line_fields):
+        pass
+
+    #HiveMetaStore.MetaStore                   0,0
+    @group(message_rules['StatusLogger'])
+    @regex(r'(?P<keyspace>[^.]*)\.(?P<column_family>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)')
+    def memtable_info(self, message_fields, line_fields):
+        convert(message_fields, ('ops', 'data'), int)
+        self.sessions[-1]['status'][-1]['memtables'].append(message_fields)
