@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<schema name="datatypes_test" version="1.0">
+<types>
+    <fieldType name="textcollection" class="solr.TextField" multiValued="true">
+      <analyzer>
+        <tokenizer class="solr.StandardTokenizerFactory"/>
+      </analyzer>
+    </fieldType>
+    <fieldType name="text" class="solr.TextField" multiValued="false">
+      <analyzer>
+        <tokenizer class="solr.StandardTokenizerFactory"/>
+      </analyzer>
+    </fieldType>
+    <fieldType name="string" class="solr.StrField" multiValued="false"/>
+    <fieldType name="int" class="solr.TrieIntField" multiValued="false"/>
+    <fieldType name="date" class="solr.TrieDateField" multiValued="false"/>
+    <fieldType name="float" class="solr.TrieFloatField" multiValued="false"/>
+    <fieldType name="double" class="solr.TrieDoubleField" multiValued="false"/>
+    <fieldType name="long" class="solr.TrieLongField" multiValued="false"/>
+    <fieldType name="binary" class="solr.BinaryField" multiValued="false"/>
+    <fieldType name="bool" class="solr.BoolField" multiValued="false"/>
+    <fieldType name="uuid" class="solr.UUIDField" multiValued="false"/>
+  </types>
+  <fields>
+    <field name="log_id" type="string" indexed="true" stored="true"/>
+    <field name="log_lineno" type="long" indexed="true" stored="true"/> 
+    <field name="level" type="string" indexed="true" stored="true"/>
+    <field name="date" type="date" indexed="true" stored="true"/>
+    <field name="source_file" type="string" indexed="true" stored="true"/>
+    <field name="source_lineno" type="long" indexed="true" stored="true"/>
+    <field name="message" type="text" indexed="true" stored="true"/>
+    <field name="type" type="text" indexed="true" stored="true"/>
+    <field name="session" type="long" indexed="true" stored="true"/>
+    <field name="exception" type="textcollection" indexed="true" stored="true"/>
+    <dynamicField name="date_*" type="date" indexed="true" stored="true"/>
+    <dynamicField name="long_*" type="long" indexed="true" stored="true"/>
+    <dynamicField name="double_*" type="double" indexed="true" stored="true"/>
+    <dynamicField name="string_*" type="string" indexed="true" stored="true"/>
+  </fields>
+
+  <uniqueKey>(log_id,log_lineno)</uniqueKey>
+  <defaultSearchField>message</defaultSearchField>
+</schema>

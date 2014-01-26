@@ -2,6 +2,9 @@ import re
 import collections
 import datetime
 import fileinput
+import requests
+import json
+import solr
 
 
 class regex:
@@ -18,9 +21,9 @@ class regex:
             if match:
                 fields = match.groupdict()
                 action(log, fields, extra_fields)
-                return True
+                return action.__name__, fields
             else:
-                return False
+                return None, None
         return rule
 
 
@@ -58,7 +61,7 @@ class SystemLog:
         fi = fileinput.FileInput(files)
         for line in fi:
             for rule in self.line_rules:
-                if rule(self, line.strip(), extra_fields=dict(log_file=fi.filename(), log_lineno=fi.filelineno())):
+                if rule(self, line.strip(), extra_fields=dict(log_id=fi.filename(), log_lineno=fi.filelineno())):
                     break
             else:
                 self.unknown_lines.append(line)
@@ -73,16 +76,44 @@ class SystemLog:
             self.sessions[-1][key] = []
         self.sessions[-1][key].append(fields)
 
+    def elastic_index(self):
+        handler = lambda obj: obj.isoformat() if hasattr(obj, 'isoformat') else obj
+        for line in self.lines:
+            requests.post('http://localhost:9200/systemlog/line/', json.dumps(line, default=handler))
+
+    def solr_index(self, url):
+        s = solr.SolrConnection(url)
+        for line in self.lines:
+            line_fields = {}
+            line_fields.update(line)
+            message_fields = line_fields.pop('message_fields')
+            for key, value in message_fields.iteritems():
+                if type(value) == int:
+                    line_fields['long_' + key] = value
+                elif type(value) == float:
+                    line_fields['double_' + key] = value
+                elif type(value) == datetime.datetime:
+                    line_fields['date_' + key] = value
+                else:
+                    line_fields['string_' + key] = str(value)
+            print line_fields
+            s.add(line_fields)
+
+
     @group(line_rules)
     @regex(r'(?P<level>[A-Z]{4,5}) \[(?P<thread>[^\]]*)\] (?P<date>.{10} .{12}) (?P<source_file>[^ ]*) \(line (?P<source_lineno>[0-9]*)\) (?P<message>.*)')
     def message_line(self, line_fields, extra_fields):
         'Parse main message line'
         line_fields['level'] = line_fields['level'].strip()
         line_fields['date'] = datetime.datetime.strptime(line_fields['date'], '%Y-%m-%d %H:%M:%S,%f')
+        line_fields['session'] = len(self.sessions) - 1
         if extra_fields is not None:
             line_fields.update(extra_fields)
         for rule in self.message_rules[line_fields['source_file'][:-5]]:
-            if rule(self, line_fields['message'], line_fields):
+            message_type, message_fields = rule(self, line_fields['message'], line_fields)
+            if message_type is not None:
+                line_fields['type'] = message_type
+                line_fields['message_fields'] = message_fields
                 break
         else:
             self.unknown_messages.append(line_fields)

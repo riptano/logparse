@@ -1,0 +1,21 @@
+drop keyspace systemlog;
+create keyspace systemlog WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 1};
+
+create table systemlog.log (
+	log_id text,
+	log_lineno bigint,
+	level text,
+	thread text,
+	date timestamp,
+	source_file text,
+	source_lineno bigint,
+	message text,
+	type text,
+	session bigint,
+	exception list<text>,
+	date_ map<text, timestamp>,
+	long_ map<text, bigint>,
+	double_ map<text, double>,
+	string_ map<text, text>,
+	primary key (log_id, log_lineno)
+) ;
