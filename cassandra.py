@@ -360,7 +360,8 @@ class SystemLog:
     @regex(r'(?P<pool_name>[A-Za-z_]+) +(?P<active>[0-9]+) +(?P<pending>[0-9]+) +(?P<completed>[0-9]+) +(?P<blocked>[0-9]+) +(?P<all_time_blocked>[0-9]+)')
     def pool_info(self, message_fields, line_fields):
         convert(message_fields, ('active', 'pending', 'completed', 'blocked', 'all_time_blocked'), int)
-        self.sessions[-1]['status'][-1]['thread_pool'].append(message_fields)
+        if 'status' in self.sessions[-1]:
+            self.sessions[-1]['status'][-1]['thread_pool'].append(message_fields)
 
     @group(message_rules['StatusLogger'])
     @regex(r'Cache Type *Size *Capacity *KeysToSave *Provider')
