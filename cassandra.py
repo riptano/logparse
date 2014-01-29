@@ -5,6 +5,7 @@ import fileinput
 import requests
 import json
 import solr
+import pytz
 
 
 class regex:
@@ -86,18 +87,20 @@ class SystemLog:
         for line in self.lines:
             line_fields = {}
             line_fields.update(line)
+            line_fields['date'] = pytz.UTC.localize(line_fields['date'])
             message_fields = line_fields.pop('message_fields')
             for key, value in message_fields.iteritems():
                 if type(value) == int:
                     line_fields['long_' + key] = value
                 elif type(value) == float:
                     line_fields['double_' + key] = value
+                elif type(value) == list:
+                    line_fields['string_' + key] = '\n'.join(value)
                 elif type(value) == datetime.datetime:
-                    line_fields['date_' + key] = value
+                    line_fields['date_' + key] = pytz.UTC.localize(value)
                 else:
                     line_fields['string_' + key] = str(value)
-            print line_fields
-            s.add(line_fields)
+            s.add(**line_fields)
 
 
     @group(line_rules)
