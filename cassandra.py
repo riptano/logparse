@@ -77,10 +77,10 @@ class SystemLog:
             self.sessions[-1][key] = []
         self.sessions[-1][key].append(fields)
 
-    def elastic_index(self):
+    def elastic_index(self, url):
         handler = lambda obj: obj.isoformat() if hasattr(obj, 'isoformat') else obj
         for line in self.lines:
-            requests.post('http://localhost:9200/systemlog/line/', json.dumps(line, default=handler))
+            requests.post(url, json.dumps(line, default=handler))
 
     def solr_index(self, url):
         s = solr.SolrConnection(url)
