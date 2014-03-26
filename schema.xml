@@ -25,6 +25,7 @@
     <field name="log_id" type="string" indexed="true" stored="true"/>
     <field name="log_lineno" type="long" indexed="true" stored="true"/> 
     <field name="level" type="string" indexed="true" stored="true"/>
+    <field name="thread" type="string" indexed="true" stored="true"/>
     <field name="date" type="date" indexed="true" stored="true"/>
     <field name="source_file" type="string" indexed="true" stored="true"/>
     <field name="source_lineno" type="long" indexed="true" stored="true"/>
@@ -32,10 +33,10 @@
     <field name="type" type="text" indexed="true" stored="true"/>
     <field name="session" type="long" indexed="true" stored="true"/>
     <field name="exception" type="textcollection" indexed="true" stored="true"/>
-    <dynamicField name="date_*" type="date" indexed="true" stored="true"/>
-    <dynamicField name="long_*" type="long" indexed="true" stored="true"/>
-    <dynamicField name="double_*" type="double" indexed="true" stored="true"/>
-    <dynamicField name="string_*" type="string" indexed="true" stored="true"/>
+    <dynamicField name="d_*" type="date" indexed="true" stored="true"/>
+    <dynamicField name="i_*" type="long" indexed="true" stored="true"/>
+    <dynamicField name="f_*" type="double" indexed="true" stored="true"/>
+    <dynamicField name="s_*" type="string" indexed="true" stored="true"/>
   </fields>
 
   <uniqueKey>(log_id,log_lineno)</uniqueKey>

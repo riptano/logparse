@@ -83,25 +83,29 @@ class SystemLog:
             requests.post(url, json.dumps(line, default=handler))
 
     def solr_index(self, url):
-        s = solr.SolrConnection(url)
+        handler = lambda obj: obj.strftime('%Y-%m-%dT%H:%M:%SZ') if hasattr(obj, 'strftime') else obj
+        if not url.endswith('/update'):
+            url += '/update'
+        docs = []
         for line in self.lines:
             line_fields = {}
             line_fields.update(line)
             line_fields['date'] = pytz.UTC.localize(line_fields['date'])
-            message_fields = line_fields.pop('message_fields')
-            for key, value in message_fields.iteritems():
-                if type(value) == int:
-                    line_fields['long_' + key] = value
-                elif type(value) == float:
-                    line_fields['double_' + key] = value
-                elif type(value) == list:
-                    line_fields['string_' + key] = '\n'.join(value)
-                elif type(value) == datetime.datetime:
-                    line_fields['date_' + key] = pytz.UTC.localize(value)
-                else:
-                    line_fields['string_' + key] = str(value)
-            s.add(**line_fields)
-
+            if 'message_fields' in line_fields:
+                message_fields = line_fields.pop('message_fields')
+                for key, value in message_fields.iteritems():
+                    if type(value) == int:
+                        line_fields['i_' + key] = value
+                    elif type(value) == float:
+                        line_fields['f_' + key] = value
+                    elif type(value) == str:
+                        line_fields['s_' + key] = str(value)
+                    elif type(value) == datetime.datetime:
+                        line_fields['d_' + key] = pytz.UTC.localize(value)
+                    else:
+                        line_fields['s_' + key] = json.dumps(value, default=handler)
+            docs.append(line_fields)
+        requests.post(url, json.dumps(docs, default=handler), headers={'Content-type': 'application/json'})
 
     @group(line_rules)
     @regex(r'(?P<level>[A-Z]{4,5}) \[(?P<thread>[^\]]*)\] (?P<date>.{10} .{12}) (?P<source_file>[^ ]*) \(line (?P<source_lineno>[0-9]*)\) (?P<message>.*)')

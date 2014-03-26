@@ -1,7 +1,7 @@
-drop keyspace systemlog;
-create keyspace systemlog WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 1};
+drop keyspace logparse;
+create keyspace logparse WITH replication = {'class': 'SimpleStrategy', 'replication_factor' : 1};
 
-create table systemlog.log (
+create table logparse.systemlog (
 	log_id text,
 	log_lineno bigint,
 	level text,
@@ -13,9 +13,9 @@ create table systemlog.log (
 	type text,
 	session bigint,
 	exception list<text>,
-	date_ map<text, timestamp>,
-	long_ map<text, bigint>,
-	double_ map<text, double>,
-	string_ map<text, text>,
+	d_ map<text, timestamp>,
+	i_ map<text, bigint>,
+	f_ map<text, double>,
+	s_ map<text, text>,
 	primary key (log_id, log_lineno)
 ) ;
