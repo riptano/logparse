@@ -4,7 +4,6 @@ import datetime
 import fileinput
 import requests
 import json
-import solr
 import pytz
 
 
