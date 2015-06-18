@@ -8,4 +8,5 @@ log = SystemLog(sys.argv[1])
 cassandra = CassandraStore()
 
 for line in log.lines:
+    line.update(line.pop('message_fields', {}))
     cassandra.insert_generic('systemlog', line)
