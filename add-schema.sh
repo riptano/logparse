@@ -26,5 +26,5 @@ echo "Posted $SCHEMA to $SCHEMA_URL"
 CREATE_URL="$SCHEME://$HOST:8983/solr/admin/cores?action=CREATE&name=logparse.systemlog"
 
 echo "Creating index..."
-curl -s $AUTH_OPTS $CLIENT_CERT_FILE $CERT_FILE  -X POST $CREATE_URL 
+curl -s $AUTH_OPTS $CLIENT_CERT_FILE $CERT_FILE  $CREATE_URL 
 echo "Created index."
