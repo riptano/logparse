@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<schema name="datatypes_test" version="1.0">
+<schema name="datatypes_test" version="1.1">
 <types>
     <fieldType name="textcollection" class="solr.TextField" multiValued="true">
       <analyzer>
