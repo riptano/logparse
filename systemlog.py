@@ -2,10 +2,7 @@ import re
 import collections
 import datetime
 import fileinput
-import requests
 import json
-import pytz
-
 
 class regex:
     'Decorator converts a single string into a dictionary of fields using the provided regex.'
@@ -82,6 +79,7 @@ class SystemLog:
         'Parse main message line'
         line_fields['level'] = line_fields['level'].strip()
         line_fields['date'] = datetime.datetime.strptime(line_fields['date'], '%Y-%m-%d %H:%M:%S,%f')
+        line_fields['source_lineno'] = int(line_fields['source_lineno'])
         line_fields['session'] = len(self.sessions) - 1
         if extra_fields is not None:
             line_fields.update(extra_fields)
