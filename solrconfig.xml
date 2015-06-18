@@ -47,10 +47,10 @@
        that you fully re-index after changing this setting as it can
        affect both how text is indexed and queried.
     -->
-  <luceneMatchVersion>LUCENE_40</luceneMatchVersion>
+  <luceneMatchVersion>LUCENE_46</luceneMatchVersion>
   
   <!-- Enable DSE Search new type mappings -->
-  <dseTypeMappingVersion>1</dseTypeMappingVersion>
+  <dseTypeMappingVersion>2</dseTypeMappingVersion>
 
   <!-- lib directives can be used to instruct Solr to load an Jars
        identified and use them to resolve any "plugins" specified in
@@ -99,7 +99,7 @@
        persistent, and doesn't work with replication.
     -->
   <directoryFactory name="DirectoryFactory" 
-                    class="com.datastax.bdp.search.solr.DSENRTCachingDirectoryFactory"/>
+                    class="solr.StandardDirectoryFactory"/>
   <indexConfig>
 
     <useCompoundFile>false</useCompoundFile>
@@ -205,7 +205,7 @@
                    triggering a new commit. 
       -->
        <autoSoftCommit> 
-         <maxTime>30000</maxTime> 
+         <maxTime>1000</maxTime> 
        </autoSoftCommit>
 
     <!-- Update Related Event Listeners
@@ -337,10 +337,13 @@
          Caches results of searches - ordered lists of document ids
          (DocList) based on a query, a sort, and the range of documents requested.  
       -->
-    <queryResultCache class="solr.LRUCache"
+      
+    <!-- DSE Note:  queryResultCache is commented out as it is cleared
+         on each soft commit -->
+    <!-- <queryResultCache class="solr.LRUCache"
                      size="512"
                      initialSize="512"
-                     autowarmCount="0"/>
+                     autowarmCount="0"/> -->
     
     <!-- Field Value Cache
          
@@ -448,7 +451,7 @@
     <listener event="firstSearcher" class="solr.QuerySenderListener">
       <arr name="queries">
         <lst>
-          <str name="q">static firstSearcher warming in solrconfig.xml</str>
+          <!-- <str name="q">static firstSearcher warming in solrconfig.xml</str> -->
         </lst>
       </arr>
     </listener>
@@ -587,6 +590,13 @@
        not be initialized until the first request that uses it.
 
     -->
+    
+    <!-- Search handler for CQL Solr queries.
+         
+         Supports configuration of query parameters, but no search components can be added.
+    -->
+    <requestHandler name="solr_query" class="com.datastax.bdp.search.solr.handler.component.CqlSearchHandler"/>
+    
   <!-- SearchHandler
 
        http://wiki.apache.org/solr/SearchHandler
