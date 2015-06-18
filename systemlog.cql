@@ -13,6 +13,7 @@ create table logparse.systemlog (
 	type text,
 	session bigint,
 	exception list<text>,
+	b_ map<text, boolean>,
 	d_ map<text, timestamp>,
 	i_ map<text, bigint>,
 	f_ map<text, double>,
