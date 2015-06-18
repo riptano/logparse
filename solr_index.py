@@ -1,5 +1,11 @@
 #!/usr/bin/env python
-import cassandra
 import sys
-log = cassandra.SystemLog(sys.argv[1])
-log.solr_index('http://localhost:8983/solr/logparse.systemlog/update')
+
+from systemlog import SystemLog
+from cassandra_store import CassandraStore
+
+log = SystemLog(sys.argv[1])
+cassandra = CassandraStore()
+
+for line in log.lines:
+    cassandra.insert_generic('systemlog', line)
