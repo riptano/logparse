@@ -17,7 +17,11 @@ def switch(*cases):
     casedict = {}
     for case in cases:
         for condition in case.conditions:
-            casedict[condition] = case.action
+            if condition not in casedict:
+                casedict[condition] = case.action
+            else:
+                casedict[condition] = first(casedict[condition], case.action)
+
     def inner_switch(case, data):
         if case in casedict:
             return casedict[case](data)
