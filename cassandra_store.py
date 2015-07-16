@@ -1,9 +1,11 @@
 import json
+import uuid
 
 from copy import deepcopy
 from datetime import datetime
 from cassandra.cluster import Cluster
 from cassandra.query import dict_factory
+from cassandra.util import uuid_from_time
 
 
 class CassandraStore:
@@ -34,6 +36,12 @@ class CassandraStore:
 
         def date_handler(obj):
             return obj.isoformat() if hasattr(obj, 'isoformat') else obj
+
+        if 'id' not in parameters:
+            if 'date' in parameters:
+                parameters['id'] = uuid_from_time(parameters['date'])
+            else:
+                parameters['id'] = uuid.uuid4()
 
         generic = {'b_': {}, 'd_': {}, 'i_': {}, 'f_': {}, 's_': {}}
         for key, value in parameters.items():

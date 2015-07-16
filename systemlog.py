@@ -1,359 +1,434 @@
 import re
-import collections
-import datetime
-import fileinput
-import json
+from datetime import datetime
 
-class regex:
-    'Decorator converts a single string into a dictionary of fields using the provided regex.'
-    def __init__(self, regex):
-        if type(regex) == str:
-            self.regex = re.compile(regex)
+def switch(rule_groups):
+    def inner_switch(group, string):
+        if group in rule_groups:
+            return rule_groups[group](string)
+        return None
+    return inner_switch
+
+def first(*rules):
+    def inner_first(string):
+        for rule in rules:
+            fields = rule(string)
+            if fields is not None:
+                return fields
+        return None
+    return inner_first
+
+
+def pipeline(source, *transforms):
+    def inner_pipeline(string):
+        fields = source(string)
+        if fields is not None:
+            for transform in transforms:
+                transform(fields)
+        return fields
+    return inner_pipeline
+
+def capture(*regex_strings):
+    regexes = []
+    for regex in regex_strings:
+        regexes.append(re.compile(regex))
+    def inner_capture(string):
+        for regex in regexes:
+            capture =  regex.match(string)
+            if capture:
+                return capture.groupdict()
+        return None
+    return inner_capture
+
+def convert(func, *field_names):
+    def inner_convert(fields):
+        for field_name in field_names:
+            if field_name in fields and fields[field_name] is not None:
+                fields[field_name] = func(fields[field_name])
+    return inner_convert
+
+
+def update(**extras):
+    return lambda fields: fields.update(extras)
+
+def strip(string):
+    return string.strip()
+
+def date(format):
+    return lambda date: datetime.strptime(date, format)
+
+def split(delimiter):
+    return lambda string: string.split(delimiter)
+
+def percent(value):
+    return float(value) * 100
+
+def sstables(value):
+    return [sstable[20:-2] for sstable in value.split(', ')]
+
+def int_with_commas(value):
+    return int(value.replace(',', ''))
+
+capture_message = switch({
+
+    'CassandraDaemon': 
+
+        first(
+
+            pipeline(
+                capture(r'Logging initialized'), 
+                update(event_type='new_session')),
+
+            pipeline(
+                capture(r'JVM vendor/version: (?P<jvm>.*)'), 
+                update(event_type='jvm_vendor')),
+
+            pipeline(
+                capture(r'Heap size: (?P<heap_used>[0-9]*)/(?P<total_heap>[0-9]*)'), 
+                convert(int, 'heap_used', 'total_heap'), 
+                update(event_type='heap_size')),
+
+            pipeline(
+                capture(r'Classpath: (?P<classpath>.*)'),
+                convert(split(':'), 'classpath'),
+                update(event_type='classpath'))),
+
+    'DseDaemon': 
+
+        pipeline(
+            capture(r'(?P<component>[A-Za-z ]*) versions?: (?P<version>.*)'),
+            update(event_type='component_version')),
+
+    'GCInspector': 
+
+        first(
+
+            pipeline(
+                capture(r'Heap is (?P<percent_full>[0-9.]*) full.*'),
+                convert(percent, 'percent_full'),
+                update(event_type='heap_full')),
+
+            pipeline(
+                capture(r'GC for (?P<gc_type>[A-Za-z]*): (?P<duration>[0-9]*) ms for (?P<collections>[0-9]*) collections, (?P<used>[0-9]*) used; max is (?P<max>[0-9]*)'),
+                convert(int, 'duration', 'collections', 'used', 'max'),
+                update(event_type='garbage_collection'))),
+
+    'ColumnFamilyStore':
+
+        first(
+    
+            pipeline(
+                capture(
+                    r'Enqueuing flush of Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)',
+                    r'Enqueuing flush of (?P<column_family>[^:]*): (?P<on_heap_bytes>[0-9]*) \((?P<on_heap_limit>[0-9]*)%\) on-heap, (?P<off_heap_bytes>[0-9]*) \((?P<off_heap_limit>[0-9]*)%\) off-heap'),
+                convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_bytes', 'off_heap_bytes', 'on_heap_limit', 'off_heap_limit'),
+                update(event_type='enqueue_flush')), 
+
+            pipeline(
+                capture(r'Initializing (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='initializing_table')),
+
+            pipeline(
+                capture(r'Flushing SecondaryIndex Cql3SolrSecondaryIndex\{columnDefs=\[(?P<column_defs>).*\]\}'),
+                convert(split(', '), 'column_defs'),
+                update(event_type='flushing_secondary_index'))),
+
+    'Memtable': #'ColumnFamilyStore': 
+
+        first( 
+
+            pipeline(
+                capture(
+                    r'Writing Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*) serialized bytes, (?P<ops>[0-9]*) ops, (?P<on_heap_limit>[0-9]*)%/(?P<off_heap_limit>[0-9]*)% of on/off-heap limit\)',
+                    r'Writing Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)'),
+                convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_limit', 'off_heap_limit'),
+                update(event_type='begin_flush')),
+
+            pipeline(
+                capture(r'Completed flushing (?P<filename>[^ ]*) \((?P<file_size>[0-9]*) bytes\) for commitlog position ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)'),
+                convert(int, 'file_size', 'segment_id', 'position'),
+                update(event_type='end_flush'))),
+
+    'CompactionTask': 
+
+        first(
+
+            pipeline(
+                capture(r'Compacting \[(?P<input_sstables>[^\]]*)\]'),
+                convert(sstables, 'input_sstables'),
+                update(event_type='begin_compaction')), 
+
+            pipeline(
+                capture(
+                    r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^,]*),\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows), (?P<unique_partitions>[0-9,]*) unique.  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}',
+                    r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^,]*),\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows) merged to (?P<unique_partitions>[0-9,]*).  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}'),
+                convert(int_with_commas, 'sstable_count', 'input_bytes', 'output_bytes', 'percent_of_original', 'duration', 'total_partitions', 'unique_partitions'),
+                update(event_type='end_compaction'))),
+
+    'CompactionController': 
+
+        pipeline(
+            capture(r'Compacting large (partition|row) (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<partition_key>[0-9]*) \((?P<partition_size>[0-9]*) bytes\) incrementally'),
+            convert(int, 'partition_size'),
+            update(event_type='incremental_compaction')),
+
+    'AntiEntropyService': 
+
+        first(
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] new session: will sync (?P<nodes>[^o]*) on range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for (?P<keyspace>[^.]*)\.\[(?P<column_families>[^\]]*)\]'),
+                convert(split(', '), 'nodes', 'column_families'),
+                update(event_type='begin_repair')),
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] requesting merkle trees for (?P<column_family>[^ ]*) \(to \[(?P<nodes>[^\]]*)\]\)'),
+                convert(split(', '), 'nodes'),
+                update(event_type='merkle_requested')), 
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] Received merkle tree for (?P<column_family>[^ ]*) from (?P<node>.*)'),
+                update(event_type='merkle_received')), 
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] Sending completed merkle tree to (?P<node>[^ ]*) for \((?P<keyspace>[^,]*),(?P<column_family>[^)]*)\)'),
+                update(event_type='merkle_sent')), 
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) are consistent for (?P<column_family>.*)'),
+                update(event_type='endpoints_consistent')),
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) have (?P<ranges>[0-9]*) range\(s\) out of sync for (?P<column_family>.*)'),
+                convert(int, 'ranges'),
+                update(event_type='endpoints_inconsistent')), 
+            
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] (?P<column_family>[^ ]*) is fully synced( \((?P<tables_remaining>[0-9]*) remaining column family to sync for this session\))?'),
+                convert(int, 'tables_remaining'),
+                update(event_type='table_synced')),
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] session completed successfully'),
+                update(event_type='end_repair'))),
+
+    'StreamInSession':  
+        
+        pipeline(
+            capture(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<node>.*)'),
+            update(event_type='finished_streaming')),
+
+    'StreamReplyVerbHandler':
+
+        pipeline(
+            capture(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<node>.*)'),
+            update(event_type='sstable_sent')),
+
+    'SSTableReader':
+
+        pipeline(
+            capture(r'Opening (?P<sstable_name>[^ ]*) \((?P<bytes>[0-9]*) bytes\)'),
+            convert(int, 'bytes'),
+            update(event_type='opening_sstable')),
+
+    'StatusLogger':
+
+        first(
+
+            pipeline(
+                capture(r'Pool Name *Active *Pending *Completed *Blocked *All Time Blocked'),
+                update(event_type='pool_header')),
+
+            pipeline(
+                capture(r'(?P<pool_name>[A-Za-z_]+) +(?P<active>[0-9]+) +(?P<pending>[0-9]+) +(?P<completed>[0-9]+) +(?P<blocked>[0-9]+) +(?P<all_time_blocked>[0-9]+)'),
+                convert(int, 'active', 'pending', 'completed', 'blocked', 'all_time_blocked'),
+                update(event_type='pool_info')),
+
+            pipeline(
+                capture(r'Cache Type *Size *Capacity *KeysToSave *Provider'),
+                update(event_type='cache_header')),
+
+            pipeline(
+                capture(r'(?P<cache_type>[A-Za-z]*Cache(?! Type)) *(?P<size>[0-9]*) *(?P<capacity>[0-9]*) *(?P<keys_to_save>[^ ]*) *(?P<provider>[A-Za-z_.$]*)'),
+                convert(int, 'size', 'capacity'),
+                update(event_type='cache_info')),
+
+            pipeline(
+                capture(r'ColumnFamily *Memtable ops,data'),
+                update(event_type='memtable_header')),
+
+
+            pipeline(
+                capture(r'(?P<keyspace>[^.]*)\.(?P<column_family>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)'),
+                convert(int, 'ops', 'data'),
+                update(event_type='memtable_info'))),
+
+    'CommitLogReplayer':
+
+        first(
+                
+                pipeline(
+                    capture(r'Replaying (?P<commitlog_file>[^ ]*)( \(CL version (?P<commitlog_version>[0-9]*), messaging version (?P<messaging_version>[0-9]*)\))?'),
+                    convert(int, 'commitlog_version', 'messaging_version'),
+                    update(event_type='begin_replay_commitlog')),
+
+                pipeline(
+                    capture(r'Finished reading (?P<commitlog_file>.*)'),
+                    update(event_type='end_replay_commitlog'))),
+
+    'SecondaryIndexManager':
+
+        pipeline(
+            capture(r'Creating new index : ColumnDefinition\{(?P<column_definition>[^}]*)\}'),
+            convert(split(', '), 'column_definition'),
+            update(event_type='creating_secondary_index')),
+
+    'SolrCoreResourceManager':
+
+        first(
+
+            pipeline(
+                capture(r"Wrote resource '(?P<resource>[^']*)' for core '(?P<keyspace>[^.]*)\.(?P<table>[^']*)'"),
+                update(event_type='solr_write_resource')),
+
+            pipeline(
+                capture(r'Trying to load resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) by querying from local node with (?P<consistency_level>.*)'),
+                update(event_type='solr_load_resource_attempt')),
+
+            pipeline(
+                capture(r'Successfully loaded resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*)'),
+                update(event_type='solr_load_resource_success')),
+
+            pipeline(
+                capture(r'No resource (?P<resource>[^ ]*) found for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) on any live node\.'),
+                update(event_type='solr_load_resource_failure')),
+
+            pipeline(
+                capture(r'Creating core: (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_create_core'))),
+
+    'AbstractSolrSecondaryIndex':
+
+        first(
+
+            pipeline(
+                capture(r'Configuring index commit log for (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_configure_index_commitlog')),
+
+            pipeline(
+                capture(r'Configuring index metrics for (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_configure_index_metrics')),
+
+            pipeline(
+                capture(r'Ensuring existence of index directory (?P<index_directory>.*)'),
+                update(event_type='solr_ensure_index_directory')),
+
+            pipeline(
+                capture(r'Executing hard commit on index (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_execute_hard_commit')),
+
+            pipeline(
+                capture(r'Loading core on keyspace (?P<keyspace>[^ ]*) and column family (?P<table>.*)'),
+                update(event_type='solr_load_core')),
+
+            pipeline(
+                capture(r'No commit log entries for core (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_no_commitlog_entries')),
+
+            pipeline(
+                capture(r'Start index TTL scheduler for (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_start_index_ttl_scheduler')),
+
+            pipeline(
+                capture(r'Start index initializer for (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_start_index_initializer')),
+
+            pipeline(
+                capture(r'Start index reloader for (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_start_index_reloader')),
+
+            pipeline(
+                capture(r'Start indexing pool for (?P<keyspace>[^.]*).(?P<table>.*)'),
+                update(event_type='solr_start_indexing_pool'))),
+
+    'YamlConfigurationLoader':
+
+        first(
+            
+            pipeline(
+                capture(r'Loading settings from file:(?P<yaml_file>.*)'),
+                update(event_type='loading_settings')),
+
+            pipeline(
+                capture(r'Node configuration:\[(?P<node_configuration>.*)\]'),
+                convert(split('; '), 'node_configuration'),
+                update(event_type='node_configuration'))),
+
+    'Worker':
+
+        pipeline(
+            capture(r'Shutting down work pool worker!'),
+            update(event_type='work_pool_shutdown')),
+
+    'SolrDispatchFilter':
+
+        first(
+
+            pipeline(
+                capture(r'SolrDispatchFilter.init\(\) done'),
+                update(event_type='solr_dispatch_filter_init_done')),
+
+            pipeline(
+                capture(r'Error request params: (?P<params>.*)'),
+                convert(split('&'), 'params'),
+                update(event_type='solr_error_request_params')),
+
+            pipeline(
+                capture(r'\[admin\] webapp=(?P<webapp>[^ ]*) path=(?P<path>[^ ]*) params=\{(?P<params>[^}]*)\} status=(?P<status>[0-9]*) QTime=(?P<qtime>[0-9]*)'),
+                convert(split('&'), 'params'),
+                convert(int, 'status', 'qtime'),
+                update(event_type='solr_admin')),
+
+            pipeline(
+                capture(r'user.dir=(?P<user_dir>.*)'),
+                update(event_type='solr_user_dir')))
+
+
+
+})
+
+def update_message(fields):
+    subfields = capture_message(fields['source_file'][:-5], fields['message'])
+    if subfields is not None:
+        fields.update(subfields)
+
+def tag_unknown(fields):
+    if 'event_type' not in fields:
+        fields['event_type'] = 'unknown'
+
+
+capture_line = pipeline(
+    capture(
+        r' *(?P<level>[A-Z]*) *\[(?P<thread_name>[^\]]*?)[:_.-]?(?P<thread_id>[0-9]*)\] (?P<date>.{10} .{12}) *(?P<source_file>[^:]*):(?P<source_line>[0-9]*) - (?P<message>.*)',
+        r' *(?P<level>[A-Z]*) \[(?P<thread>[^\]]*)\] (?P<date>.{10} .{12}) (?P<source_file>[^ ]*) \(line (?P<source_line>[0-9]*)\) (?P<message>.*)'),
+    convert(date('%Y-%m-%d %H:%M:%S,%f'), 'date'),
+    convert(int, 'source_line'),
+    update_message,
+    tag_unknown)
+
+def parse_log(lines, **extras):
+    fields = None
+    for line in lines:
+        next_fields = capture_line(line)
+        if next_fields is not None:
+            if fields is not None:
+                fields.update(extras)
+                if 'exception' in fields:
+                    fields['exception'] = ''.join(fields['exception'])
+                yield fields
+            fields = next_fields
         else:
-            self.regex = regex
-
-    def __call__(self, action):
-        def rule(log, input, extra_fields=None):
-            match = self.regex.match(input)
-            if match:
-                fields = match.groupdict()
-                action(log, fields, extra_fields)
-                return action.__name__, fields
-            else:
-                return None, None
-        return rule
-
-
-class group:
-    'Decorator registers a rule in the specified list.'
-    def __init__(self, *args):
-        self.rule_lists = args
-
-    def __call__(self, rule):
-        for rule_list in self.rule_lists:
-            rule_list.append(rule)
-        return rule
-
-
-def convert(dictionary, field_list, func):
-    'Convenience function to convert a list of fields using a function.'
-    for field in field_list:
-        try:
-            dictionary[field] = func(dictionary[field])
-        except:
-            pass
-
-
-class SystemLog:
-    'Cassandra system.log parser'
-    line_rules = []
-    message_rules = collections.defaultdict(list)
-
-    def __init__(self, files=None):
-        self.lines = []
-        self.sessions = [{}]
-        self.saved_fields = collections.defaultdict(dict)
-        self.unknown_lines = []
-        self.unknown_messages = []
-        fi = fileinput.FileInput(files)
-        for line in fi:
-            for rule in self.line_rules:
-                if rule(self, line.strip(), extra_fields=dict(log_id=fi.filename(), log_lineno=fi.filelineno())):
-                    break
-            else:
-                self.unknown_lines.append(line)
-
-    def update_session(self, key, fields):
-        if key not in self.sessions[-1]:
-            self.sessions[-1][key] = {}
-        self.sessions[-1][key].update(fields)
-
-    def append_session(self, key, fields):
-        if key not in self.sessions[-1]:
-            self.sessions[-1][key] = []
-        self.sessions[-1][key].append(fields)
-
-    @group(line_rules)
-    @regex(r'(?P<level>[A-Z]{4,5}) \[(?P<thread>[^\]]*)\] (?P<date>.{10} .{12}) (?P<source_file>[^ ]*) \(line (?P<source_lineno>[0-9]*)\) (?P<message>.*)')
-    def message_line(self, line_fields, extra_fields):
-        'Parse main message line'
-        line_fields['level'] = line_fields['level'].strip()
-        line_fields['date'] = datetime.datetime.strptime(line_fields['date'], '%Y-%m-%d %H:%M:%S,%f')
-        line_fields['source_lineno'] = int(line_fields['source_lineno'])
-        line_fields['session'] = len(self.sessions) - 1
-        if extra_fields is not None:
-            line_fields.update(extra_fields)
-        for rule in self.message_rules[line_fields['source_file'][:-5]]:
-            message_type, message_fields = rule(self, line_fields['message'], line_fields)
-            if message_type is not None:
-                line_fields['type'] = message_type
-                line_fields['message_fields'] = message_fields
-                break
-        else:
-            self.unknown_messages.append(line_fields)
-        if line_fields['level'] == 'ERROR':
-            self.append_session('errors', line_fields)
-        elif line_fields['level'] == 'WARN':
-            self.append_session('warnings', line_fields)
-        self.lines.append(line_fields)
-
-    @group(line_rules)
-    @regex(r'^(?!Caused by:)(?P<exception>[^:]*): (?P<exception_message>.*)')
-    def exception_line(self, line_fields, extra_fields):
-        'Parse exception line and update previous message line'
-        self.lines[-1].update(line_fields)
-
-    @group(line_rules)
-    @regex(r'^Caused by: (?P<exception>[^:]*): (?P<exception_message>.*)')
-    def caused_by_line(self, line_fields, extra_fields):
-        'Parse nested exceptions'
-        if 'caused_by' not in self.lines[-1]:
-            self.lines[-1]['caused_by'] = []
-        self.lines[-1]['caused_by'].append(line_fields)
-
-    @group(line_rules)
-    @regex(r'at (?P<method>[^(]*)\((?P<source_file>[^:)]*):?(?P<source_lineno>[0-9]*)\)')
-    def trace_line(self, line_fields, extra_fields):
-        'Parse stack trace line and append to previous message line'
-        line_fields['source_lineno'] = None if line_fields['source_lineno'] == '' else int(line_fields['source_lineno'])
-        components = line_fields['method'].split('.')
-        line_fields['package'] = '.'.join(components[:-3])
-        line_fields['class'] = components[-2]
-        line_fields['method'] = components[-1]
-        if 'caused_by' in self.lines[-1]:
-            if 'stack_trace' not in self.lines[-1]['caused_by'][-1]:
-                self.lines[-1]['caused_by'][-1]['stack_trace'] = []
-            self.lines[-1]['caused_by'][-1]['stack_trace'].append(line_fields)
-        else:
-            if 'stack_trace' not in self.lines[-1]:
-                self.lines[-1]['stack_trace'] = []
-            self.lines[-1]['stack_trace'].append(line_fields)
-
-    @group(message_rules['CassandraDaemon'])
-    @regex(r'Logging initialized')
-    def new_session(self, message_fields, line_fields):
-        'Catch cassandra restart and begin a new session'
-        if self.sessions != [{}]:
-            self.sessions.append({})
-        self.sessions[-1]['start_date'] = line_fields['date']
-
-    @group(message_rules['CassandraDaemon'])
-    @regex(r'JVM vendor/version: (?P<jvm>.*)')
-    def jvm_vendor(self, message_fields, line_fields):
-        self.update_session('environment', message_fields)
-
-    @group(message_rules['CassandraDaemon'])
-    @regex(r'Heap size: (?P<heap_used>[0-9]*)/(?P<total_heap>[0-9]*)')
-    def heap_size(self, message_fields, line_fields):
-        convert(message_fields, ('heap_used', 'total_heap'), int)
-        self.update_session('environment', message_fields)
-
-    @group(message_rules['CassandraDaemon'])
-    @regex(r'Classpath: (?P<classpath>.*)')
-    def classpath(self, message_fields, line_fields):
-        message_fields['classpath'] = message_fields['classpath'].split(':')
-        self.update_session('environment', message_fields)
-
-    @group(message_rules['DseDaemon'], message_rules['StorageService'])
-    @regex(r'(?P<component>[A-Za-z ]*) versions?: (?P<version>.*)')
-    def component_version(self, message_fields, line_fields):
-        self.append_session('versions', message_fields)
-
-    @group(message_rules['GCInspector'])
-    @regex(r'Heap is (?P<percent_full>[0-9.]*) full.*')
-    def heap_full(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        message_fields['percent_full'] = float(message_fields['percent_full']) * 100
-        self.append_session('heap_warnings', message_fields)
-
-    @group(message_rules['GCInspector'])
-    @regex(r'GC for (?P<type>[A-Za-z]*): (?P<duration>[0-9]*) ms for (?P<collections>[0-9]*) collections, (?P<used>[0-9]*) used; max is (?P<max>[0-9]*)')
-    def garbage_collection(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        convert(message_fields, ('duration', 'collections', 'used', 'max'), int)
-        self.append_session('garbage_collections', message_fields)
-
-    #Enqueuing flush of Memtable-hints@424700025(76/760 serialized/live bytes, 4 ops)
-    @group(message_rules['ColumnFamilyStore'])
-    @regex(r'Enqueuing flush of Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)')
-    def begin_flush(self, message_fields, line_fields):
-        message_fields['enqueue_date'] = line_fields['date']
-        convert(message_fields, ('hash_code', 'serialized_bytes', 'live_bytes', 'ops'), int)
-        self.saved_fields[message_fields['column_family'], message_fields['hash_code']] = message_fields
-
-    @group(message_rules['Memtable'])
-    @regex(r'Writing Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)')
-    def begin_flush(self, message_fields, line_fields):
-        convert(message_fields, ('hash_code', 'serialized_bytes', 'live_bytes', 'ops'), int)
-        enqueue_fields = self.saved_fields.get((message_fields['column_family'], message_fields['hash_code']), {})
-        message_fields['enqueue_date'] = enqueue_fields.get('enqueue_date')
-        message_fields['begin_date'] = line_fields['date']
-        if line_fields['thread'] not in self.saved_fields:
-            self.saved_fields[line_fields['thread']] = {}
-        self.saved_fields[line_fields['thread']].update(message_fields)
-
-    @group(message_rules['Memtable'])
-    @regex(r'Completed flushing (?P<filename>[^ ]*) \((?P<file_size>[0-9]*) bytes\) for commitlog position ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)')
-    def end_flush(self, message_fields, line_fields):
-        message_fields['end_date'] = line_fields['date']
-        convert(message_fields, ('file_size', 'segment_id', 'position'), int)
-        message_fields.update(self.saved_fields[line_fields['thread']])
-        del self.saved_fields[line_fields['thread']]
-        self.append_session('flushes', message_fields)
-
-    @group(message_rules['CompactionTask'])
-    @regex(r'Compacting \[(?P<input_sstables>[^\]]*)\]')
-    def begin_compaction(self, message_fields, line_fields):
-        message_fields['begin_date'] = line_fields['date']
-        message_fields['input_sstables'] = [sstable[20:-2] for sstable in message_fields['input_sstables'].split(', ')]
-        self.saved_fields[line_fields['thread']] = message_fields
-
-    @group(message_rules['CompactionTask'])
-    @regex(r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^,]*),\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_rows>[0-9,]*) total rows, (?P<unique_rows>[0-9,]*) unique.  Row merge counts were \{(?P<row_merge_counts>[^}]*)\}')
-    def end_compaction(self, message_fields, line_fields):
-        message_fields['end_date'] = line_fields['date']
-        message_fields['rate'] = float(message_fields['rate'])
-        convert(message_fields,
-                ('sstable_count', 'input_bytes', 'output_bytes', 'percent_of_original', 'duration', 'total_rows', 'unique_rows'),
-                lambda value: int(value.replace(',', '')))
-        message_fields.update(self.saved_fields[line_fields['thread']])
-        del self.saved_fields[line_fields['thread']]
-        self.append_session('compactions', message_fields)
-
-    @group(message_rules['CompactionController'])
-    @regex(r'Compacting large row (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<row_key>[0-9]*) \((?P<row_size>[0-9]*) bytes\) incrementally')
-    def incremental_compaction(self, message_fields, line_fields):
-        message_fields['row_size'] = int(message_fields['row_size'])
-        message_fields['date'] = line_fields['date']
-        compaction = self.saved_fields[line_fields['thread']]
-        if 'incremental_rows' not in compaction:
-            compaction['incremental_rows'] = []
-        compaction['incremental_rows'].append(message_fields)
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] new session: will sync (?P<nodes>[^o]*) on range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for (?P<keyspace>[^.]*)\.\[(?P<column_families>[^\]]*)\]')
-    def begin_repair(self, message_fields, line_fields):
-        message_fields['start_date'] = line_fields['date']
-        message_fields['nodes'] = message_fields['nodes'].split(', ')
-        message_fields['column_families'] = message_fields['column_families'].split(', ')
-        self.saved_fields[message_fields['session_id']] = message_fields
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] requesting merkle trees for (?P<column_family>[^ ]*) \(to \[(?P<nodes>[^\]]*)\]\)')
-    def merkle_requested(self, message_fields, line_fields):
-        merkle_requests = self.saved_fields[message_fields['session_id']].get('merkle_requests', {})
-        for node in message_fields['nodes'].split(', '):
-            merkle_requests[message_fields['column_family'], node] = {
-                'request_date': line_fields['date'],
-                'column_family': message_fields['column_family'],
-                'node': node
-            }
-        self.saved_fields[message_fields['session_id']]['merkle_requests'] = merkle_requests
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] Received merkle tree for (?P<column_family>[^ ]*) from (?P<node>.*)')
-    def merkle_received(self, message_fields, line_fields):
-        merkle_requests = self.saved_fields[message_fields['session_id']].get('merkle_requests', {})
-        merkle_requests[message_fields['column_family'], message_fields['node']]['receive_date'] = line_fields['date']
-        self.saved_fields[message_fields['session_id']]['merkle_requests'] = merkle_requests
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] Sending completed merkle tree to (?P<node>[^ ]*) for \((?P<keyspace>[^,]*),(?P<column_family>[^)]*)\)')
-    def merkle_sent(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        sent_merkles = self.saved_fields[message_fields['session_id']].get('sent_merkles', [])
-        sent_merkles.append(message_fields)
-        self.saved_fields[message_fields['session_id']]['sent_merkles'] = sent_merkles
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) are consistent for (?P<column_family>.*)')
-    def endpoints_consistent(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        consistent_endpoints = self.saved_fields[message_fields['session_id']].get('consistent_endpoints', [])
-        consistent_endpoints.append(message_fields)
-        self.saved_fields[message_fields['session_id']]['consistent_endpoints'] = consistent_endpoints
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) have (?P<ranges>[0-9]*) range\(s\) out of sync for (?P<column_family>.*)')
-    def endpoints_inconsistent(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        inconsistent_endpoints = self.saved_fields[message_fields['session_id']].get('inconsistent_endpoints', [])
-        inconsistent_endpoints.append(message_fields)
-        self.saved_fields[message_fields['session_id']]['inconsistent_endpoints'] = inconsistent_endpoints
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] (?P<column_family>[^ ]*) is fully synced( \((?P<cfs_remaining>[0-9]*) remaining column family to sync for this session\))?')
-    def columnfamily_synced(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        synced_columnfamilies = self.saved_fields[message_fields['session_id']].get('synced_columnfamilies', [])
-        synced_columnfamilies.append(message_fields)
-        self.saved_fields[message_fields['session_id']]['synced_columnfamilies'] = synced_columnfamilies
-
-    @group(message_rules['AntiEntropyService'])
-    @regex(r'\[repair #(?P<session_id>[^\]]*)\] session completed successfully')
-    def end_repair(self, message_fields, line_fields):
-        repair_session = self.saved_fields[message_fields['session_id']]
-        repair_session['end_date'] = line_fields['date']
-        repair_session['merkle_requests'] = repair_session['merkle_requests'].values()
-        self.append_session('repair_sessions', repair_session)
-        del self.saved_fields[message_fields['session_id']]
-
-    @group(message_rules['StreamInSession'])
-    @regex(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<node>.*)')
-    def finished_streaming(self, message_fields, line_fields):
-        message_fields['end_date'] = line_fields['date']
-        self.append_session('streaming_sessions', message_fields)
-
-    @group(message_rules['StreamReplyVerbHandler'])
-    @regex(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<node>.*)')
-    def finished_streaming(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        self.append_session('sstables_sent', message_fields)
-
-    @group(message_rules['SSTableReader'])
-    @regex(r'Opening (?P<sstable_name>[^ ]*) \((?P<bytes>[0-9]*) bytes\)')
-    def finished_streaming(self, message_fields, line_fields):
-        message_fields['date'] = line_fields['date']
-        message_fields['bytes'] = int(message_fields['bytes'])
-        self.append_session('opened_sstables', message_fields)
-
-    @group(message_rules['StatusLogger'])
-    @regex(r'Pool Name *Active *Pending *Completed *Blocked *All Time Blocked')
-    def pool_header(self, message_fields, line_fields):
-        self.append_session('status', {
-            'date': line_fields['date'],
-            'thread_pool': [],
-            'caches': [],
-            'memtables': []
-        })
-
-    @group(message_rules['StatusLogger'])
-    @regex(r'(?P<pool_name>[A-Za-z_]+) +(?P<active>[0-9]+) +(?P<pending>[0-9]+) +(?P<completed>[0-9]+) +(?P<blocked>[0-9]+) +(?P<all_time_blocked>[0-9]+)')
-    def pool_info(self, message_fields, line_fields):
-        convert(message_fields, ('active', 'pending', 'completed', 'blocked', 'all_time_blocked'), int)
-        if 'status' in self.sessions[-1]:
-            self.sessions[-1]['status'][-1]['thread_pool'].append(message_fields)
-
-    @group(message_rules['StatusLogger'])
-    @regex(r'Cache Type *Size *Capacity *KeysToSave *Provider')
-    def cache_header(self, message_fields, line_fields):
-        pass
-
-    @group(message_rules['StatusLogger'])
-    @regex(r'(?P<type>[A-Za-z]*Cache(?! Type)) *(?P<size>[0-9]*) *(?P<capacity>[0-9]*) *(?P<keys_to_save>[^ ]*) *(?P<provider>[A-Za-z_.$]*)')
-    def cache_info(self, message_fields, line_fields):
-        convert(message_fields, ('size', 'capacity'), int)
-        if 'status' in self.sessions[-1]:
-            self.sessions[-1]['status'][-1]['caches'].append(message_fields)
-
-    @group(message_rules['StatusLogger'])
-    @regex(r'ColumnFamily *Memtable ops,data')
-    def memtable_header(self, message_fields, line_fields):
-        pass
-
-    @group(message_rules['StatusLogger'])
-    @regex(r'(?P<keyspace>[^.]*)\.(?P<column_family>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)')
-    def memtable_info(self, message_fields, line_fields):
-        convert(message_fields, ('ops', 'data'), int)
-        if 'status' in self.sessions[-1]:
-            self.sessions[-1]['status'][-1]['memtables'].append(message_fields)
+            if fields is not None:
+                if 'exception' in fields:
+                    fields['exception'].append(line)
+                else:
+                    fields['exception'] = [line]

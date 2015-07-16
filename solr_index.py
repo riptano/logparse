@@ -1,12 +1,17 @@
 #!/usr/bin/env python
 import sys
+import socket
+import fileinput
 
-from systemlog import SystemLog
+import systemlog
 from cassandra_store import CassandraStore
 
-log = SystemLog(sys.argv[1])
 cassandra = CassandraStore()
 
-for line in log.lines:
-    line.update(line.pop('message_fields', {}))
-    cassandra.insert_generic('systemlog', line)
+hostname = socket.gethostname()
+log = fileinput.input()
+for event in systemlog.parse_log(log):
+    event['host'] = hostname
+    event['log_file'] = fileinput.filename()
+    event['log_line'] = fileinput.lineno()
+    cassandra.insert_generic('systemlog', event)
