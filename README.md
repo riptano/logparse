@@ -1,6 +1,6 @@
 # Cassandra system.log parser
 
-This is a rule-based Cassandra `system.log` parser.  The `systemlog.py` file contains
+This is a rule-based Cassandra `system.log` parser.  The [systemlog.py](systemlog.py) file contains
 a set of rules that define how to parse the system.log. The `parse_log` generator applies
 these rules and yields a dictionary containing a single event from the log at a time.
 It takes as input another generator which should yield one line from the log at a time.
@@ -8,18 +8,18 @@ This works perfectly with `fileinput` from the python standard library.
 
 ## log_to_json
 
-The `log_to_json` script parses system.log and outputs events in JSON format with one
+The [log_to_json](log_to_json) script parses system.log and outputs events in JSON format with one
 event per line.  It takes a list of log files on the command line and parses them.
 If no arguments are supplied it will attempt to parse stdin. This can be used to parse
 a live log file by piping from tail: `tail -f /var/log/cassandra/system.log | log_to_json`.
 
 ## cassandra_ingest
 
-The `cassandra_ingest` script parses system.log and inserts each event into the
-logparse.systemlog table defined in `systemlog.cql`. It takes a list of log files
+The [cassandra_ingest](cassandra_ingest) script parses system.log and inserts each event into the
+logparse.systemlog table defined in [systemlog.cql](systemlog.cql). It takes a list of log files
 on the command line and parses them.  If no arguments are supplied it will attempt 
 to parse stdin. This can be used to parse a live log file by piping from tail: 
-`tail -f /var/log/cassandra/system.log | log_to_json`.
+`tail -f /var/log/cassandra/system.log | cassandra_ingest`.
 
 The systemlog table contains a standard set of fields that are common to each event,
 as well as a set of collections of various types, and fields that do not exist in 
@@ -28,7 +28,7 @@ the type of data it contains. This allows event-specific fields to be saved
 automatically.  The naming convention of these collections allows them to be treated 
 as dynamic fields when the table is indexed in DSE's implementation of Solr.
 
-The `cassandra_store.py` file contains the code to save the log data into Cassandra.
+The [cassandra_store.py](cassandra_store.py) file contains the code to save the log data into Cassandra.
 It requires the [DataStax Python Driver](https://github.com/datastax/python-driver).
 It should be installed by running `pip install cassandra`. The script currently assumes
 that Cassandra is running on `localhost` on the default CQL port 9042.
@@ -37,12 +37,13 @@ that Cassandra is running on `localhost` on the default CQL port 9042.
 
 The logparse.systemlog table can be indexed using the Solr implementation from 
 [DataStax Enterprise](http://docs.datastax.com/en/datastax_enterprise/4.7//datastax_enterprise/newFeatures.html).
-A `schema.xml` and `solrconfig.xml` are provided in the `solr` directory along with
-the `add-schema.sh` script which will upload the Solr schema to DSE.  
+A [schema.xml](solr/schema.xml) and [solrconfig.xml](solr/solrconfig.xml) are provided
+in the [solr](solr) directory along with the [add-schema.sh](solr/add-schema.sh) script 
+which will upload the Solr schema to DSE.  
 
 Once indexed in Solr, the log events can be subsequently analyzed and visualized using 
 [Banana](https://github.com/LucidWorks/banana).  Banana is a port of Kibana 3.0 to Solr.
-Several pre-made dashboards are saved in json format in the `banana` subdirectory. 
+Several pre-made dashboards are saved in json format in the [banana](banana) subdirectory. 
 These can be loaded using the Banana web UI.
 
 Setup Instructions:
@@ -81,6 +82,8 @@ Setup Instructions:
 
 ## Definining Rules
 
-The rules governing the parsing of `system.log` are defined in the `systemlog.py` file.
-These are specified using a Domain-Specific Language defined by the functions in `rules.py`.
-Further documentation of the DSL will be provided at a later time.
+The rules governing the parsing of `system.log` are defined in the [systemlog.py](systemlog.py) file.
+These are specified using a Domain-Specific Language defined by the functions in [rules.py](rules.py).
+The rules are explained by docstrings in rules.py, and existing rules found in systemlog.py
+can be used as examples. The DSL can also be used to specify a completely new set of rules for a different
+type of log file.
