@@ -1,0 +1,18 @@
+#!/usr/bin/env python
+import sys
+import socket
+import json
+import fileinput
+
+import systemlog
+
+def date_handler(obj):
+    return obj.isoformat() if hasattr(obj, 'isoformat') else obj
+
+hostname = socket.gethostname()
+log = fileinput.input()
+for event in systemlog.parse_log(log):
+    event['host'] = hostname
+    event['log_file'] = fileinput.filename()
+    event['log_line'] = fileinput.lineno()
+    print json.dumps(event, default=date_handler)
