@@ -28,7 +28,8 @@ the type of data it contains. This allows event-specific fields to be saved
 automatically.  The naming convention of these collections allows them to be treated 
 as dynamic fields when the table is indexed in DSE's implementation of Solr.
 
-The `cassandra_ingest` script requires the [DataStax Python Driver](https://github.com/datastax/python-driver).
+The `cassandra_store.py` file contains the code to save the log data into Cassandra.
+It requires the [DataStax Python Driver](https://github.com/datastax/python-driver).
 It should be installed by running `pip install cassandra`. The script currently assumes
 that Cassandra is running on `localhost` on the default CQL port 9042.
 
@@ -36,8 +37,8 @@ that Cassandra is running on `localhost` on the default CQL port 9042.
 
 The logparse.systemlog table can be indexed using the Solr implementation from 
 [DataStax Enterprise](http://docs.datastax.com/en/datastax_enterprise/4.7//datastax_enterprise/newFeatures.html).
-A `schema.xml` and `solrconfig.xml` are provided along with the `add-schema.sh` script
-which will upload the Solr schema to DSE.  
+A `schema.xml` and `solrconfig.xml` are provided in the `solr` directory along with
+the `add-schema.sh` script which will upload the Solr schema to DSE.  
 
 Once indexed in Solr, the log events can be subsequently analyzed and visualized using 
 [Banana](https://github.com/LucidWorks/banana).  Banana is a port of Kibana 3.0 to Solr.
