@@ -1,12 +1,21 @@
 import re
 from datetime import datetime
 
-def switch(rule_groups):
-    def inner_switch(group, string):
-        if group in rule_groups:
-            return rule_groups[group](string)
+def switch(*cases):
+    casedict = {}
+    for case in cases:
+        for condition in case.conditions:
+            casedict[condition] = case.action
+    def inner_switch(case, data):
+        if case in casedict:
+            return casedict[case](data)
         return None
     return inner_switch
+
+class case:
+    def __init__(self, *params):
+        self.conditions = params[:-1]
+        self.action = params[-1]
 
 def first(*rules):
     def inner_first(string):
@@ -46,7 +55,6 @@ def convert(func, *field_names):
                 fields[field_name] = func(fields[field_name])
     return inner_convert
 
-
 def update(**extras):
     return lambda fields: fields.update(extras)
 
@@ -68,9 +76,9 @@ def sstables(value):
 def int_with_commas(value):
     return int(value.replace(',', ''))
 
-capture_message = switch({
+capture_message = switch(
 
-    'CassandraDaemon': 
+    case('CassandraDaemon', 
 
         first(
 
@@ -90,15 +98,15 @@ capture_message = switch({
             pipeline(
                 capture(r'Classpath: (?P<classpath>.*)'),
                 convert(split(':'), 'classpath'),
-                update(event_type='classpath'))),
+                update(event_type='classpath')))),
 
-    'DseDaemon': 
+    case('DseDaemon', 
 
         pipeline(
             capture(r'(?P<component>[A-Za-z ]*) versions?: (?P<version>.*)'),
-            update(event_type='component_version')),
+            update(event_type='component_version'))),
 
-    'GCInspector': 
+    case('GCInspector', 
 
         first(
 
@@ -110,9 +118,9 @@ capture_message = switch({
             pipeline(
                 capture(r'GC for (?P<gc_type>[A-Za-z]*): (?P<duration>[0-9]*) ms for (?P<collections>[0-9]*) collections, (?P<used>[0-9]*) used; max is (?P<max>[0-9]*)'),
                 convert(int, 'duration', 'collections', 'used', 'max'),
-                update(event_type='garbage_collection'))),
+                update(event_type='garbage_collection')))),
 
-    'ColumnFamilyStore':
+    case('ColumnFamilyStore',
 
         first(
     
@@ -130,9 +138,9 @@ capture_message = switch({
             pipeline(
                 capture(r'Flushing SecondaryIndex Cql3SolrSecondaryIndex\{columnDefs=\[(?P<column_defs>).*\]\}'),
                 convert(split(', '), 'column_defs'),
-                update(event_type='flushing_secondary_index'))),
+                update(event_type='flushing_secondary_index')))),
 
-    'Memtable': #'ColumnFamilyStore': 
+    case('Memtable', 'ColumnFamilyStore',
 
         first( 
 
@@ -146,9 +154,9 @@ capture_message = switch({
             pipeline(
                 capture(r'Completed flushing (?P<filename>[^ ]*) \((?P<file_size>[0-9]*) bytes\) for commitlog position ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)'),
                 convert(int, 'file_size', 'segment_id', 'position'),
-                update(event_type='end_flush'))),
+                update(event_type='end_flush')))),
 
-    'CompactionTask': 
+    case('CompactionTask', 
 
         first(
 
@@ -162,25 +170,25 @@ capture_message = switch({
                     r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^,]*),\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows), (?P<unique_partitions>[0-9,]*) unique.  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}',
                     r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^,]*),\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows) merged to (?P<unique_partitions>[0-9,]*).  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}'),
                 convert(int_with_commas, 'sstable_count', 'input_bytes', 'output_bytes', 'percent_of_original', 'duration', 'total_partitions', 'unique_partitions'),
-                update(event_type='end_compaction'))),
+                update(event_type='end_compaction')))),
 
-    'CompactionController': 
+    case('CompactionController', 
 
         pipeline(
             capture(r'Compacting large (partition|row) (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<partition_key>[0-9]*) \((?P<partition_size>[0-9]*) bytes\) incrementally'),
             convert(int, 'partition_size'),
-            update(event_type='incremental_compaction')),
+            update(event_type='incremental_compaction'))),
 
-    'AntiEntropyService': 
+    case('AntiEntropyService', 
 
         first(
 
 
             pipeline(
                 capture(r'\[repair #(?P<session_id>[^\]]*)\] session completed successfully'),
-                update(event_type='end_repair'))),
+                update(event_type='end_repair')))),
 
-    'Differencer': # 'AntiEntropyService'
+    case('Differencer', 'AntiEntropyService',
 
         first(
 
@@ -191,15 +199,15 @@ capture_message = switch({
             pipeline(
                 capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) have (?P<ranges>[0-9]*) range\(s\) out of sync for (?P<table>.*)'),
                 convert(int, 'ranges'),
-                update(event_type='endpoints_inconsistent'))), 
+                update(event_type='endpoints_inconsistent')))),
 
-    'Validator': # 'AntiEntropyService'
+    case('Validator', 'AntiEntropyService',
 
         pipeline(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] Sending completed merkle tree to (?P<node>[^ ]*) for \(?(?P<keyspace>[^,]*)[/,](?P<table>[^)]*)\)?'),
-            update(event_type='merkle_sent')), 
+            update(event_type='merkle_sent'))), 
 
-    'RepairSession': # 'AntiEntropyService'
+    case('RepairSession', 'AntiEntropyService',
 
         first(
 
@@ -214,28 +222,28 @@ capture_message = switch({
             pipeline(
                 capture(r'\[repair #(?P<session_id>[^\]]*)\] new session: will sync (?P<nodes>.*?) on range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for (?P<keyspace>[^.]*)\.\[(?P<tables>[^\]]*)\]'),
                 convert(split(', '), 'nodes', 'tables'),
-                update(event_type='begin_repair'))),
+                update(event_type='begin_repair')))),
 
-    'RepairJob': # 'AntiEntropyService'
+    case('RepairJob', 'AntiEntropyService',
 
         pipeline(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] requesting merkle trees for (?P<table>[^ ]*) \(to \[(?P<nodes>[^\]]*)\]\)'),
             convert(split(', '), 'nodes'),
-            update(event_type='merkle_requested')), 
+            update(event_type='merkle_requested'))),
 
-    'StreamInSession':  
+    case('StreamInSession',  
         
         pipeline(
             capture(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<node>.*)'),
-            update(event_type='finished_streaming')),
+            update(event_type='finished_streaming'))),
 
-    'StreamResultFuture':
+    case('StreamResultFuture',
 
         pipeline(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] Session with (?P<node>[^ ]*) is complete'),
-            update(event_type='finished_streaming')),
+            update(event_type='finished_streaming'))),
 
-    'StreamingRepairTask':
+    case('StreamingRepairTask',
 
         first(
 
@@ -245,22 +253,22 @@ capture_message = switch({
 
             pipeline(
                 capture(r'\[repair #(?P<session_id>[^\]]*)\] streaming task succeed, returning response to (?P<node>[^ ]*)'),
-                update(event_type='stream_succeeded'))),
+                update(event_type='stream_succeeded')))),
 
-    'StreamReplyVerbHandler':
+    case('StreamReplyVerbHandler',
 
         pipeline(
             capture(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<node>.*)'),
-            update(event_type='sstable_sent')),
+            update(event_type='sstable_sent'))),
 
-    'SSTableReader':
+    case('SSTableReader',
 
         pipeline(
             capture(r'Opening (?P<sstable_name>[^ ]*) \((?P<bytes>[0-9]*) bytes\)'),
             convert(int, 'bytes'),
-            update(event_type='opening_sstable')),
+            update(event_type='opening_sstable'))),
 
-    'StatusLogger':
+    case('StatusLogger',
 
         first(
 
@@ -290,29 +298,29 @@ capture_message = switch({
             pipeline(
                 capture(r'(?P<keyspace>[^.]*)\.(?P<table>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)'),
                 convert(int, 'ops', 'data'),
-                update(event_type='memtable_info'))),
+                update(event_type='memtable_info')))),
 
-    'CommitLogReplayer':
+    case('CommitLogReplayer',
 
         first(
                 
-                pipeline(
-                    capture(r'Replaying (?P<commitlog_file>[^ ]*)( \(CL version (?P<commitlog_version>[0-9]*), messaging version (?P<messaging_version>[0-9]*)\))?'),
-                    convert(int, 'commitlog_version', 'messaging_version'),
-                    update(event_type='begin_replay_commitlog')),
+            pipeline(
+                capture(r'Replaying (?P<commitlog_file>[^ ]*)( \(CL version (?P<commitlog_version>[0-9]*), messaging version (?P<messaging_version>[0-9]*)\))?'),
+                convert(int, 'commitlog_version', 'messaging_version'),
+                update(event_type='begin_replay_commitlog')),
 
-                pipeline(
-                    capture(r'Finished reading (?P<commitlog_file>.*)'),
-                    update(event_type='end_replay_commitlog'))),
+            pipeline(
+                capture(r'Finished reading (?P<commitlog_file>.*)'),
+                update(event_type='end_replay_commitlog')))),
 
-    'SecondaryIndexManager':
+    case('SecondaryIndexManager',
 
         pipeline(
             capture(r'Creating new index : ColumnDefinition\{(?P<column_definition>[^}]*)\}'),
             convert(split(', '), 'column_definition'),
-            update(event_type='creating_secondary_index')),
+            update(event_type='creating_secondary_index'))),
 
-    'SolrCoreResourceManager':
+    case('SolrCoreResourceManager',
 
         first(
 
@@ -334,9 +342,9 @@ capture_message = switch({
 
             pipeline(
                 capture(r'Creating core: (?P<keyspace>[^.]*).(?P<table>.*)'),
-                update(event_type='solr_create_core'))),
+                update(event_type='solr_create_core')))),
 
-    'AbstractSolrSecondaryIndex':
+    case('AbstractSolrSecondaryIndex',
 
         first(
 
@@ -378,9 +386,9 @@ capture_message = switch({
 
             pipeline(
                 capture(r'Start indexing pool for (?P<keyspace>[^.]*).(?P<table>.*)'),
-                update(event_type='solr_start_indexing_pool'))),
+                update(event_type='solr_start_indexing_pool')))),
 
-    'YamlConfigurationLoader':
+    case('YamlConfigurationLoader',
 
         first(
             
@@ -391,15 +399,15 @@ capture_message = switch({
             pipeline(
                 capture(r'Node configuration:\[(?P<node_configuration>.*)\]'),
                 convert(split('; '), 'node_configuration'),
-                update(event_type='node_configuration'))),
+                update(event_type='node_configuration')))),
 
-    'Worker':
+    case('Worker',
 
         pipeline(
             capture(r'Shutting down work pool worker!'),
-            update(event_type='work_pool_shutdown')),
+            update(event_type='work_pool_shutdown'))),
 
-    'SolrDispatchFilter':
+    case('SolrDispatchFilter',
 
         first(
 
@@ -420,29 +428,28 @@ capture_message = switch({
 
             pipeline(
                 capture(r'user.dir=(?P<user_dir>.*)'),
-                update(event_type='solr_user_dir'))),
+                update(event_type='solr_user_dir')))),
 
-    'ExternalLogger':
+    case('ExternalLogger',
 
         pipeline(
             capture(r'(?P<source>[^:]*): (?P<message>.*)'),
-            update(event_type='spark_external_logger')),
+            update(event_type='spark_external_logger'))),
 
-    'SliceQueryFilter':
+    case('SliceQueryFilter',
 
         pipeline(
             capture(r'Read (?P<live_cells>[0-9]*) live and (?P<tombstoned_cells>[0-9]*) tombstoned cells in (?P<keyspace>[^.]*).(?P<table>[^ ]*) \(see tombstone_warn_threshold\). (?P<requested_columns>[0-9]*) columns was requested, slices=\[(?P<slice_start>[^-]*)-(?P<slice_end>[^\]]*)\], delInfo=\{(?P<deletion_info>[^}]*)\}'),
             convert(int, 'live_cells', 'tombstoned_cells', 'requested_columns'),
             convert(split(', '), 'deletion_info'),
-            update(event_type='tombstone_warning')),
+            update(event_type='tombstone_warning'))),
     
-    'MeteredFlusher':
+    case('MeteredFlusher',
 
         pipeline(
             capture(r"Flushing high-traffic column family CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) \(estimated (?P<estimated_bytes>[0-9]*) bytes\)"),
             convert(int, 'estimated_bytes'),
-            update(event_type='metered_flush'))
-})
+            update(event_type='metered_flush'))))
 
 def update_message(fields):
     subfields = capture_message(fields['source_file'][:-5], fields['message'])
