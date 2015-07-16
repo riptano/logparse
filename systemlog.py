@@ -118,8 +118,8 @@ capture_message = switch({
     
             pipeline(
                 capture(
-                    r'Enqueuing flush of Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)',
-                    r'Enqueuing flush of (?P<column_family>[^:]*): (?P<on_heap_bytes>[0-9]*) \((?P<on_heap_limit>[0-9]*)%\) on-heap, (?P<off_heap_bytes>[0-9]*) \((?P<off_heap_limit>[0-9]*)%\) off-heap'),
+                    r'Enqueuing flush of Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)',
+                    r'Enqueuing flush of (?P<table>[^:]*): (?P<on_heap_bytes>[0-9]*) \((?P<on_heap_limit>[0-9]*)%\) on-heap, (?P<off_heap_bytes>[0-9]*) \((?P<off_heap_limit>[0-9]*)%\) off-heap'),
                 convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_bytes', 'off_heap_bytes', 'on_heap_limit', 'off_heap_limit'),
                 update(event_type='enqueue_flush')), 
 
@@ -138,8 +138,8 @@ capture_message = switch({
 
             pipeline(
                 capture(
-                    r'Writing Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*) serialized bytes, (?P<ops>[0-9]*) ops, (?P<on_heap_limit>[0-9]*)%/(?P<off_heap_limit>[0-9]*)% of on/off-heap limit\)',
-                    r'Writing Memtable-(?P<column_family>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)'),
+                    r'Writing Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*) serialized bytes, (?P<ops>[0-9]*) ops, (?P<on_heap_limit>[0-9]*)%/(?P<off_heap_limit>[0-9]*)% of on/off-heap limit\)',
+                    r'Writing Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)'),
                 convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_limit', 'off_heap_limit'),
                 update(event_type='begin_flush')),
 
@@ -175,47 +175,77 @@ capture_message = switch({
 
         first(
 
-            pipeline(
-                capture(r'\[repair #(?P<session_id>[^\]]*)\] new session: will sync (?P<nodes>[^o]*) on range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for (?P<keyspace>[^.]*)\.\[(?P<column_families>[^\]]*)\]'),
-                convert(split(', '), 'nodes', 'column_families'),
-                update(event_type='begin_repair')),
-
-            pipeline(
-                capture(r'\[repair #(?P<session_id>[^\]]*)\] requesting merkle trees for (?P<column_family>[^ ]*) \(to \[(?P<nodes>[^\]]*)\]\)'),
-                convert(split(', '), 'nodes'),
-                update(event_type='merkle_requested')), 
-
-            pipeline(
-                capture(r'\[repair #(?P<session_id>[^\]]*)\] Received merkle tree for (?P<column_family>[^ ]*) from (?P<node>.*)'),
-                update(event_type='merkle_received')), 
-
-            pipeline(
-                capture(r'\[repair #(?P<session_id>[^\]]*)\] Sending completed merkle tree to (?P<node>[^ ]*) for \((?P<keyspace>[^,]*),(?P<column_family>[^)]*)\)'),
-                update(event_type='merkle_sent')), 
-
-            pipeline(
-                capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) are consistent for (?P<column_family>.*)'),
-                update(event_type='endpoints_consistent')),
-
-            pipeline(
-                capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) have (?P<ranges>[0-9]*) range\(s\) out of sync for (?P<column_family>.*)'),
-                convert(int, 'ranges'),
-                update(event_type='endpoints_inconsistent')), 
-            
-            pipeline(
-                capture(r'\[repair #(?P<session_id>[^\]]*)\] (?P<column_family>[^ ]*) is fully synced( \((?P<tables_remaining>[0-9]*) remaining column family to sync for this session\))?'),
-                convert(int, 'tables_remaining'),
-                update(event_type='table_synced')),
 
             pipeline(
                 capture(r'\[repair #(?P<session_id>[^\]]*)\] session completed successfully'),
                 update(event_type='end_repair'))),
+
+    'Differencer': # 'AntiEntropyService'
+
+        first(
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) are consistent for (?P<table>.*)'),
+                update(event_type='endpoints_consistent')),
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) have (?P<ranges>[0-9]*) range\(s\) out of sync for (?P<table>.*)'),
+                convert(int, 'ranges'),
+                update(event_type='endpoints_inconsistent'))), 
+
+    'Validator': # 'AntiEntropyService'
+
+        pipeline(
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] Sending completed merkle tree to (?P<node>[^ ]*) for \(?(?P<keyspace>[^,]*)[/,](?P<table>[^)]*)\)?'),
+            update(event_type='merkle_sent')), 
+
+    'RepairSession': # 'AntiEntropyService'
+
+        first(
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] Received merkle tree for (?P<table>[^ ]*) from (?P<node>.*)'),
+                update(event_type='merkle_received')), 
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] (?P<table>[^ ]*) is fully synced'),
+                update(event_type='table_fully_synced')),
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] new session: will sync (?P<nodes>.*?) on range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for (?P<keyspace>[^.]*)\.\[(?P<tables>[^\]]*)\]'),
+                convert(split(', '), 'nodes', 'tables'),
+                update(event_type='begin_repair'))),
+
+    'RepairJob': # 'AntiEntropyService'
+
+        pipeline(
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] requesting merkle trees for (?P<table>[^ ]*) \(to \[(?P<nodes>[^\]]*)\]\)'),
+            convert(split(', '), 'nodes'),
+            update(event_type='merkle_requested')), 
 
     'StreamInSession':  
         
         pipeline(
             capture(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<node>.*)'),
             update(event_type='finished_streaming')),
+
+    'StreamResultFuture':
+
+        pipeline(
+            capture(r'\[Stream #(?P<session_id>[^\]]*)\] Session with (?P<node>[^ ]*) is complete'),
+            update(event_type='finished_streaming')),
+
+    'StreamingRepairTask':
+
+        first(
+
+            pipeline(
+                capture(r'\[streaming task #(?P<session_id>[^\]]*)\] Performing streaming repair of (?P<ranges>[0-9]*) ranges with (?P<node>[^ ]*)'),
+                update(event_type='performing_repair')),
+
+            pipeline(
+                capture(r'\[repair #(?P<session_id>[^\]]*)\] streaming task succeed, returning response to (?P<node>[^ ]*)'),
+                update(event_type='stream_succeeded'))),
 
     'StreamReplyVerbHandler':
 
@@ -258,7 +288,7 @@ capture_message = switch({
 
 
             pipeline(
-                capture(r'(?P<keyspace>[^.]*)\.(?P<column_family>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)'),
+                capture(r'(?P<keyspace>[^.]*)\.(?P<table>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)'),
                 convert(int, 'ops', 'data'),
                 update(event_type='memtable_info'))),
 
@@ -390,10 +420,28 @@ capture_message = switch({
 
             pipeline(
                 capture(r'user.dir=(?P<user_dir>.*)'),
-                update(event_type='solr_user_dir')))
+                update(event_type='solr_user_dir'))),
 
+    'ExternalLogger':
 
+        pipeline(
+            capture(r'(?P<source>[^:]*): (?P<message>.*)'),
+            update(event_type='spark_external_logger')),
 
+    'SliceQueryFilter':
+
+        pipeline(
+            capture(r'Read (?P<live_cells>[0-9]*) live and (?P<tombstoned_cells>[0-9]*) tombstoned cells in (?P<keyspace>[^.]*).(?P<table>[^ ]*) \(see tombstone_warn_threshold\). (?P<requested_columns>[0-9]*) columns was requested, slices=\[(?P<slice_start>[^-]*)-(?P<slice_end>[^\]]*)\], delInfo=\{(?P<deletion_info>[^}]*)\}'),
+            convert(int, 'live_cells', 'tombstoned_cells', 'requested_columns'),
+            convert(split(', '), 'deletion_info'),
+            update(event_type='tombstone_warning')),
+    
+    'MeteredFlusher':
+
+        pipeline(
+            capture(r"Flushing high-traffic column family CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) \(estimated (?P<estimated_bytes>[0-9]*) bytes\)"),
+            convert(int, 'estimated_bytes'),
+            update(event_type='metered_flush'))
 })
 
 def update_message(fields):
@@ -408,8 +456,8 @@ def tag_unknown(fields):
 
 capture_line = pipeline(
     capture(
-        r' *(?P<level>[A-Z]*) *\[(?P<thread_name>[^\]]*?)[:_.-]?(?P<thread_id>[0-9]*)\] (?P<date>.{10} .{12}) *(?P<source_file>[^:]*):(?P<source_line>[0-9]*) - (?P<message>.*)',
-        r' *(?P<level>[A-Z]*) \[(?P<thread>[^\]]*)\] (?P<date>.{10} .{12}) (?P<source_file>[^ ]*) \(line (?P<source_line>[0-9]*)\) (?P<message>.*)'),
+        r' *(?P<level>[A-Z]*) *\[(?P<thread_name>[^\]]*?)[:_-]?(?P<thread_id>[0-9]*)\] (?P<date>.{10} .{12}) *(?P<source_file>[^:]*):(?P<source_line>[0-9]*) - (?P<message>.*)',
+        r' *(?P<level>[A-Z]*) \[(?P<thread_name>[^\]]*?)[:_-]?(?P<thread_id>[0-9]*)\] (?P<date>.{10} .{12}) (?P<source_file>[^ ]*) \(line (?P<source_line>[0-9]*)\) (?P<message>.*)'),
     convert(date('%Y-%m-%d %H:%M:%S,%f'), 'date'),
     convert(int, 'source_line'),
     update_message,
