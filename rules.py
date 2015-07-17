@@ -5,75 +5,62 @@ parsing the lines in a log file.
 
 import re
 from datetime import datetime
+from collections import defaultdict
 
-def switch(*cases):
+def switch(*children):
     '''
-    Selects between one or more alternatives based on the case value and applies the selected 
-    alternative to the data value, returning the results from the expected case. Returns None
-    if none of the cases are selected.
+    Tries multiple rules in the specified order until one returns a value other than None.
+    Returns the result of the first successful rule.  Can be configured to run only a 
+    subset of the rules using an optional case value.
     
-    Constructor expects to be passed one or more case objects.
+    Constructor expects to be passed one or more case and rule objects. The case objects are
+    used to group the rules.
     '''
-    casedict = {}
-    for case in cases:
-        for condition in case.conditions:
-            if condition not in casedict:
-                casedict[condition] = case.action
-            else:
-                casedict[condition] = first(casedict[condition], case.action)
-
-    def inner_switch(case, data):
-        if case in casedict:
-            return casedict[case](data)
+    rules = defaultdict(list)
+    keys = None
+    for child in children:
+        if isinstance(child, case):
+            keys = child.keys
+        else:
+            for key in keys:
+                rules[key].append(child)
+    print rules
+    def inner_switch(key, data):
+        if key in rules:
+            for rule in rules[key]:
+                result = rule(data)
+                if result is not None:
+                    return result
         return None
     return inner_switch
 
 class case:
     '''
-    Specifies an alternative for a switch rule.  
-    
-    Constructor expects to be passed one or more strings, followed by an action rule that takes 
-    a string as input and returns None or a dictionary of values. At least one of the strings in
+    Specifies an alternative for a switch rule.
+
+    Constructor expects to be passed one or more strings. At least one of the strings in
     the case must match the case value passed to the switch for the case to be selected.
     '''
-    def __init__(self, *params):
-        self.conditions = params[:-1]
-        self.action = params[-1]
+    def __init__(self, *keys):
+        self.keys = keys
 
-def first(*rules):
+def rule(source, *transforms):
     '''
-    Applies a list of rules to the input value and stops after the first successful rule, returning
-    its value. Returns None if none of the rules are successful.
+    Executes the condition, and optionally one or more actions. If the condition returns None,
+    the rule returns None immediately.  If the condition returns something other than None, the
+    rule executes each action in order, passing the result of the condition into each.
     
-    Constructor expects a list of one or more rules to apply as parameters.  A successful rule
-    is expected to return a dictionary of values. An unsuccessful rule is expected to return None.
+    Constructor expects the first parameter to be a function that takes a string as input. The
+    condition should return None to indicate failure or something else to indicate success.
+    The remaining parameters should be functions that act on the result of the condition.  
     '''
-    def inner_first(string):
-        for rule in rules:
-            fields = rule(string)
-            if fields is not None:
-                return fields
-        return None
-    return inner_first
-
-def pipeline(source, *transforms):
-    '''
-    Forms a pipeline of one source and one or more transformations.  Returns the dictionary created
-    by the source rule after all the specified transformations have been applied. No transformations
-    will be executed if the source rule returns None.
-    
-    Constructor expects the first parameter to be a rule that takes a string as input. If the source
-    rule successfully matches the input, it should returns a dictionary of values extracted from the
-    input string.  If it does not match, it should return None.  The remaining parameters specify 
-    transformation rules that modify the dictionary in place.  
-    '''
-    def inner_pipeline(string):
+    def inner_rule(string):
         fields = source(string)
         if fields is not None:
             for transform in transforms:
                 transform(fields)
         return fields
-    return inner_pipeline
+    return inner_rule
 
 def capture(*regex_strings):
     '''
