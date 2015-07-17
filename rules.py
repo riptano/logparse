@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from collections import defaultdict
 
-def switch(*children):
+def switch(children):
     '''
     Tries multiple rules in the specified order until one returns a value other than None.
     Returns the result of the first successful rule.  Can be configured to run only a 
@@ -24,7 +24,6 @@ def switch(*children):
         else:
             for key in keys:
                 rules[key].append(child)
-    print rules
     def inner_switch(key, data):
         if key in rules:
             for rule in rules[key]:
