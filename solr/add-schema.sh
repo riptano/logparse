@@ -5,9 +5,10 @@
 # SCHEME  - (http|https)
 # CERT_FILE - client certificate file
 # AUTH_OPTS - Additional security options for curl
-cqlsh -f systemlog.cql
 cd `dirname $0`
 . ./set-solr-options.sh $*
+
+cqlsh -f ../systemlog.cql
 
 SOLRCONFIG_URL="$SCHEME://$HOST:8983/solr/resource/logparse.systemlog/solrconfig.xml"
 SOLRCONFIG=solrconfig.xml

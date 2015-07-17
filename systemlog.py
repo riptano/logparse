@@ -3,96 +3,116 @@ from rules import *
 def sstables(value):
     return [sstable[20:-2] for sstable in value.split(', ')]
 
-capture_message = switch(
+def fix_solr_exception(fields):
+    fields['exception'] = fields['message'] + fields['exception']
+    fields['message'] = ''
+
+capture_message = switch((
 
     case('CassandraDaemon'), 
 
         rule(
             capture(r'Logging initialized'), 
-            update(event_type='startup_begin')),
+            update(event_category='startup', event_type='node_restart')),
 
         rule(
             capture(r'JVM vendor/version: (?P<jvm>.*)'), 
-            update(event_type='startup_jvm_vendor')),
+            update(event_category='startup', event_type='jvm_vendor')),
 
         rule(
             capture(r'Heap size: (?P<heap_used>[0-9]*)/(?P<total_heap>[0-9]*)'), 
             convert(int, 'heap_used', 'total_heap'), 
-            update(event_type='startup_heap_size')),
+            update(event_category='startup', event_type='heap_size')),
 
         rule(
             capture(r'Classpath: (?P<classpath>.*)'),
             convert(split(':'), 'classpath'),
-            update(event_type='startup_classpath')),
+            update(event_category='startup', event_type='classpath')),
 
         rule(
             capture(r'JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.'),
-            update(event_type='startup_jmx_remote_disabled')),
+            update(event_category='startup', event_type='jmx_remote_disabled')),
 
         rule(
             capture(r'No gossip backlog; proceeding'),
-            update(event_type='startup_gossip_backlog_done')),
+            update(event_category='startup', event_type='gossip_backlog_done')),
 
         rule(
             capture(r'Waiting for gossip to settle before accepting client requests...'),
-            update(event_type='startup_gossip_wait')),
+            update(event_category='startup', event_type='gossip_wait')),
 
         rule(
             capture(r'completed pre-loading \((?P<keys_loaded>[0-9]*) keys\) key cache.'),
-            update(event_type='startup_preload_keycache')),
+            update(event_category='startup', event_type='preload_keycache')),
 
         rule(
             capture(r'Waiting for gossip to settle before accepting client requests...'),
-            update(event_type='startup_gossip_settling')),
+            update(event_category='startup', event_type='gossip_settling')),
 
         rule(
             capture(r'Cassandra shutting down...'),
-            update(event_type='shutdown')),
+            update(event_category='shutdown', event_type='begin_shutdown')),
 
         rule(
             capture(r'Hostname: (?P<hostname>.*)'),
-            update(event_type='startup_hostname')),
+            update(event_category='startup', event_type='hostname')),
 
         rule(
             capture(r'(?P<memory_type>.*) memory: init = (?P<memory_init>[0-9]*)\([0-9]*K\) used = (?P<memory_used>[0-9]*)\([0-9]*K\) committed = (?P<memory_committed>[0-9]*)\([0-9]*K\) max = (?P<memory_max>[0-9-]*)\([0-9-]*K\)'),
             convert(int, 'memory_init', 'memory_used', 'memory_committed', 'memory_max'),
-            update(event_type='startup_memory_size')),
+            update(event_category='startup', event_type='memory_size')),
 
         rule(
             capture(r'Exception in thread Thread\[(?P<exception_thread>[^\]]*)\]'),
-            update(event_type='exception')),
+            update(event_category='misc', event_type='exception')),
 
     case('DseConfig', 'DseSearchConfig'),
 
         rule(
             capture(r'Load of settings is done.'),
-            update(event_type='startup_dse_settings_done')),
+            update(event_category='startup', event_type='dse_settings_done')),
 
         rule(
-            capture(r'(?P<feature>.*) (is|are) enabled.'),
-            update(event_type='startup_dse_feature_enabled')),
+            capture(r'(?P<feature>.*) (is|are) enabled'),
+            update(event_category='startup', event_type='dse_feature_enabled')),
 
         rule(
-            capture(r'(?P<feature>.*) (is|are) not enabled.'),
-            update(event_type='startup_dse_feature_disabled')),
+            capture(r'(?P<feature>.*) (is|are) not enabled'),
+            update(event_category='startup', event_type='dse_feature_disabled')),
+
+    case('DseModule'),
+
+#Using Solr-enabled cql queries
+#CFS operations enabled
+#Loading DSE module
 
     case('DseDaemon'), 
 
         rule(
             capture(r'(?P<component>[A-Za-z ]*) versions?: (?P<version>.*)'),
-            update(event_type='startup_dse_component_version')),
+            update(event_category='startup', event_type='dse_component_version')),
+
+#Waiting for other nodes to become alive...
+#Wait for nodes completed
+#DSE shutting down...
+#The following nodes seems to be down: [/10.1.40.11, /10.1.40.10, /10.1.40.13, /10.1.40.12, /10.1.40.15, /10.1.40.14, /10.1.0.19, /10.1.40.19, /10.1.40.18]. Some Cassandra operations may fail with UnavailableException.
 
     case('GCInspector'), 
 
         rule(
             capture(r'Heap is (?P<percent_full>[0-9.]*) full.*'),
             convert(percent, 'percent_full'),
-            update(event_type='gc_heap_full')),
+            update(event_category='garbage_collection', event_type='heap_full')),
 
         rule(
             capture(r'GC for (?P<gc_type>[A-Za-z]*): (?P<duration>[0-9]*) ms for (?P<collections>[0-9]*) collections, (?P<used>[0-9]*) used; max is (?P<max>[0-9]*)'),
             convert(int, 'duration', 'collections', 'used', 'max'),
-            update(event_type='gc_pause')),
+            update(event_category='garbage_collection', event_type='pause')),
+
+        rule(
+            capture(r'(?P<gc_type>[A-Za-z]*) GC in (?P<duration>[0-9]*)ms. (( CMS)? Old Gen: (?P<oldgen_before>[0-9]*) -> (?P<oldgen_after>[0-9]*);)?( Code Cache: (?P<codecache_before>[0-9]*) -> (?P<codecache_after>[0-9]*);)?( Compressed Class Space: (?P<compressed_class_before>[0-9]*) -> (?P<compressed_class_after>[0-9]*);)?( CMS Perm Gen: (?P<permgen_before>[0-9]*) -> (?P<permgen_after>[0-9]*);)?( Metaspace: (?P<metaspace_before>[0-9]*) -> (?P<metaspace_after>[0-9]*);)?( Par Eden Space: (?P<eden_before>[0-9]*) -> (?P<eden_after>[0-9]*);)?( Par Survivor Space: (?P<survivor_before>[0-9]*) -> (?P<survivor_after>[0-9]*))?'),
+            convert(int, 'duration', 'oldgen_before', 'oldgen_after', 'permgen_before', 'permgen_after', 'codecache_before', 'codecache_after', 'compressed_class_before', 'compressed_class_after', 'metaspace_before', 'metaspace_after', 'eden_before', 'eden_after', 'survivor_before', 'survivor_after'),
+            update(event_category='garbage_collection', event_type='pause')),
 
     case('ColumnFamilyStore'),
 
@@ -101,57 +121,76 @@ capture_message = switch(
                 r'Enqueuing flush of Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)',
                 r'Enqueuing flush of (?P<table>[^:]*): (?P<on_heap_bytes>[0-9]*) \((?P<on_heap_limit>[0-9]*)%\) on-heap, (?P<off_heap_bytes>[0-9]*) \((?P<off_heap_limit>[0-9]*)%\) off-heap'),
             convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_bytes', 'off_heap_bytes', 'on_heap_limit', 'off_heap_limit'),
-            update(event_type='flush_enqueue')), 
+            update(event_category='flush', event_type='enqueue_flush')), 
 
         rule(
             capture(r'Initializing (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='startup_table_init')),
+            update(event_category='startup', event_type='table_init')),
 
         rule(
             capture(r'Flushing SecondaryIndex Cql3SolrSecondaryIndex\{columnDefs=\[(?P<column_defs>).*\]\}'),
             convert(split(', '), 'column_defs'),
-            update(event_type='flush_secondary_index')),
+            update(event_category='flush', event_type='secondary_index')),
+
+#Unable to cancel in-progress compactions for tenantactivity.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.
+#Flushing largest CFS(Keyspace='exchangecf', ColumnFamily='users') to free up room. Used total: 0/0, live: 0/0, flushing: 0/0, this: 0/0
+#Unable to cancel in-progress compactions for userdatasetuserhourlysnapshot.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.
+#Flushing SecondaryIndex ThriftSolrSecondaryIndex{columnDefs=[ColumnDefinition{name=dashboard, type=org.apache.cassandra.db.marshal.UTF8Type, kind=REGULAR, componentIndex=null, indexName=banana_int_dashboard_index, indexType=CUSTOM}, ColumnDefinition{name=_docBoost, type=org.apache.cassandra.db.marshal.UTF8Type, kind=REGULAR, componentIndex=null, indexName=banana_int__docBoost_index, indexType=CUSTOM}]}
+#Flushing SecondaryIndex com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex@12e1ee0e
 
     case('Memtable', 'ColumnFamilyStore'),
 
         rule(
             capture(
-                r'Writing Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*) serialized bytes, (?P<ops>[0-9]*) ops, (?P<on_heap_limit>[0-9]*)%/(?P<off_heap_limit>[0-9]*)% of on/off-heap limit\)',
+                r'Writing Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\(((?P<serialized_bytes>[0-9]*)|(?P<serialized_kb>[0-9.]*)KiB|(?P<serialized_mb>[0-9.]*)MiB) serialized bytes, (?P<ops>[0-9]*) ops, (?P<on_heap_limit>[0-9]*)%/(?P<off_heap_limit>[0-9]*)% of on/off-heap limit\)',
                 r'Writing Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)'),
             convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_limit', 'off_heap_limit'),
-            update(event_type='flush_begin')),
+            convert(float, 'serialized_kb'),
+            update(event_category='flush', event_type='begin_flush')),
 
         rule(
-            capture(r'Completed flushing (?P<filename>[^ ]*) \((?P<file_size>[0-9]*) bytes\) for commitlog position ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)'),
-            convert(int, 'file_size', 'segment_id', 'position'),
-            update(event_type='flush_end')),
+            capture(
+                r'Completed flushing (?P<filename>[^ ]*) \(((?P<file_size_mb>[0-9.]*)MiB|(?P<file_size_kb>[0-9.]*)KiB|(?P<file_size_bytes>[0-9]*) bytes)\) for commitlog position ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)',
+                r'Completed flushing; nothing needed to be retained.  Commitlog position was ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)'),
+            convert(int, 'file_size_bytes', 'segment_id', 'position'),
+            convert(float, 'file_size_kb'),
+            update(event_category='flush', event_type='end_flush')),
+
+#CFS(Keyspace='system', ColumnFamily='peers') liveRatio is 12.14786535650746 (just-counted was 11.247694113701158).  calculation took 69ms for 180 columns
+#setting live ratio to maximum of 64.0 instead of 122.84600389863547
 
     case('SSTableDeletingTask'),
 
         rule(
             capture(r"Unable to delete (?P<sstable_file>[^ ]*) \(it will be removed on server restart; we'll also retry after GC\)"),
-            update(event_type='sstable_deletion_failed')),
+            update(event_category='compaction', event_type='sstable_deletion_failed')),
+
+    case('CompactionManager'),
+
+#Will not compact /opt/mp/storage/persistent/cassandra-dse/cassandra-lib/data/system/hints/system-hints-ic-11: it is not an active sstable
+#Compaction interrupted: Compaction@3696255e-d8b5-3b5c-89b2-ccd9f2811e94(exchangecf, userdatasetraw, 248714703273/395476084710)bytes
+#No files to compact for user defined compaction
 
     case('CompactionTask'), 
 
         rule(
             capture(r'Compacting \[(?P<input_sstables>[^\]]*)\]'),
             convert(sstables, 'input_sstables'),
-            update(event_type='compaction_begin')), 
+            update(event_category='compaction', event_type='begin_compaction')), 
 
         rule(
             capture(
                 r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^\]]*)\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows), (?P<unique_partitions>[0-9,]*) unique.  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}',
                 r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^\]]*)\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows) merged to (?P<unique_partitions>[0-9,]*).  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}'),
             convert(int_with_commas, 'sstable_count', 'input_bytes', 'output_bytes', 'percent_of_original', 'duration', 'total_partitions', 'unique_partitions'),
-            update(event_type='compaction_end')),
+            update(event_category='compaction', event_type='end_compaction')),
 
     case('CompactionController'), 
 
         rule(
             capture(r'Compacting large (partition|row) (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<partition_key>.*) \((?P<partition_size>[0-9]*) bytes\) incrementally'),
             convert(int, 'partition_size'),
-            update(event_type='compaction_incremental')),
+            update(event_category='compaction', event_type='incremental')),
 
 #Compacting large row exchangecf/maventenanterrors:710a03f5-10f6-4d38-9ff4-a80b81da590d (93368360 bytes) incrementally
 
@@ -159,325 +198,653 @@ capture_message = switch(
 
         rule(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) are consistent for (?P<table>.*)'),
-            update(event_type='repair_endpoints_consistent')),
+            update(event_category='repair', event_type='endpoints_consistent')),
 
         rule(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] Endpoints (?P<node1>[^ ]*) and (?P<node2>[^ ]*) have (?P<ranges>[0-9]*) range\(s\) out of sync for (?P<table>.*)'),
             convert(int, 'ranges'),
-            update(event_type='repair_endpoints_inconsistent')),
+            update(event_category='repair', event_type='endpoints_inconsistent')),
 
     case('RepairSession', 'AntiEntropyService'),
 
         rule(
-            capture(r'\[repair #(?P<session_id>[^\]]*)\] Received merkle tree for (?P<table>[^ ]*) from (?P<node>.*)'),
-            update(event_type='repair_merkle_received')),
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] Received merkle tree for (?P<table>[^ ]*) from (?P<endpoint>.*)'),
+            update(event_category='repair', event_type='merkle_received')),
 
         rule(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] (?P<table>[^ ]*) is fully synced'),
-            update(event_type='repair_table_synced')),
+            update(event_category='repair', event_type='table_synced')),
 
         rule(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] session completed successfully'),
-            update(event_type='repair_session_success')),
+            update(event_category='repair', event_type='session_success')),
 
         rule(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] new session: will sync (?P<nodes>.*?) on range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for (?P<keyspace>[^.]*)\.\[(?P<tables>[^\]]*)\]'),
             convert(split(', '), 'nodes', 'tables'),
-            update(event_type='repair_session_begin')),
+            update(event_category='repair', event_type='new_session')),
 
         rule(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] Cannot proceed on repair because a neighbor \((?P<endpoint>[^)]*)\) is dead: session failed'),
-            update(event_type='repair_session_cannot_proceed')), 
+            update(event_category='repair', event_type='session_cannot_proceed')), 
+
+        rule(
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] session completed with the following error'),
+            update(event_category='repair', event_type='session_error')),
 
     case('RepairJob', 'AntiEntropyService'),
 
         rule(
             capture(r'\[repair #(?P<session_id>[^\]]*)\] requesting merkle trees for (?P<table>[^ ]*) \(to \[(?P<nodes>[^\]]*)\]\)'),
             convert(split(', '), 'nodes'),
-            update(event_type='repair_merkle_requested')),
+            update(event_category='repair', event_type='merkle_requested')),
+
+        rule(
+            capture(r'Error occurred during snapshot phase'),
+            update(event_category='repair', event_type='error_during_snapshot')),
 
     case('StreamInSession'),  
         
         rule(
-            capture(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<node>.*)'),
-            update(event_type='stream_session_end')),
+            capture(r'Finished streaming session (?P<session_id>[^ ]*) from (?P<endpoint>.*)'),
+            update(event_category='stream', event_type='stream_in_end')),
+
+    case('StreamOut'),
+
+#Beginning transfer to /10.66.131.46
+#Stream context metadata [/data/cassandra/OpsCenter/rollups60/OpsCenter-rollups60-ic-642-Data.db sections=3 progress=0/752241 - 0%, /data/cassandra/OpsCenter/rollups60/OpsCenter-rollups60-ic-792-Data.db sections=1 progress=0/11471 - 0%], 23 sstables.
+#Flushing memtables for [CFS(Keyspace='OpsCenter', ColumnFamily='rollups86400')]...
+
+    case('StreamOutSession'),
+
+        rule(
+            capture(r'Streaming to (?P<endpoint>.*)'),
+            update(event_category='stream', event_type='stream_out_begin')),
+
+    case('FileStreamTask'),
+
+        rule(
+            capture(r'Finished streaming session to (?P<endpoint>.*)'),
+            update(event_category='stream', event_type='stream_out_end')),
 
     case('StreamResultFuture'),
 
         rule(
-            capture(r'\[Stream #(?P<session_id>[^\]]*)\] Session with (?P<node>[^ ]*) is complete'),
-            update(event_type='stream_session_end')),
+            capture(r'\[Stream #(?P<session_id>[^\]]*)\] Session with (?P<endpoint>[^ ]*) is complete'),
+            update(event_category='stream', event_type='session_complete')),
 
         rule(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] Prepare completed. Receiving (?P<receiving_files>[0-9]*) files\((?P<receiving_bytes>[0-9]*) bytes\), sending (?P<sending_files>[0-9]*) files\((?P<sending_bytes>[0-9]*) bytes\)'),
             convert(int, 'receiving_files', 'receiving_bytes', 'sending_files', 'sending_bytes'),
-            update(event_type='stream_prepare_complete')),
+            update(event_category='stream', event_type='prepare_complete')),
 
         rule(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] Executing streaming plan for (?P<action>.*)'),
-            update(event_type='stream_plan_executing')),
+            update(event_category='stream', event_type='execute_plan')),
 
         rule(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] All sessions completed'),
-            update(event_type='stream_all_sessions_complete')),
-
-        rule(
-            capture(r'\[Stream #(?P<session_id>[^\]]*)\] Beginning stream session with (?P<endpoint>.*)'),
-            update(event_type='stream_session_begin')),
+            update(event_category='stream', event_type='all_sessions_complete')),
 
         rule(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] Received streaming plan for (?P<action>.*)'),
-            update(event_type='stream_plan_received')),
+            update(event_category='stream', event_type='plan_received')),
 
         rule(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] Stream failed'),
-            update(event_type='stream_failure')),
+            update(event_category='stream', event_type='failure')),
+
+        rule(
+            capture(r'\[Stream #(?P<session_id>[^\]]*)\] Creating new streaming plan for Repair'),
+            update(event_category='stream', event_type='create_plan')),
+
+    case('StreamCoordinator', 'StreamResultFuture'),
+
+        rule(
+            capture(r'\[Stream #(?P<session_id>[^\]]*)\] Beginning stream session with (?P<endpoint>.*)'),
+            update(event_category='stream', event_type='begin_session')),
 
     case('StreamingRepairTask'),
 
         rule(
-            capture(r'\[streaming task #(?P<session_id>[^\]]*)\] Performing streaming repair of (?P<ranges>[0-9]*) ranges with (?P<node>[^ ]*)'),
-            update(event_type='stream_task_begin')),
+            capture(r'\[streaming task #(?P<session_id>[^\]]*)\] Performing streaming repair of (?P<ranges>[0-9]*) ranges with (?P<endpoint>[^ ]*)'),
+            update(event_category='stream', event_type='begin_task')),
 
         rule(
-            capture(r'\[repair #(?P<session_id>[^\]]*)\] streaming task succeed, returning response to (?P<node>[^ ]*)'),
-            update(event_type='stream_task_succeeded')),
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] streaming task succeed, returning response to (?P<endpoint>[^ ]*)'),
+            update(event_category='stream', event_type='task_succeeded')),
 
         rule(
-            capture(r'\[repair #(?P<session_id>[^\]]*)\] Forwarding streaming repair of (?P<ranges>[0-9]*) ranges to (?P<forwarded_endpoint>[^ ]*) \(to be streamed with (?P<target_endpoint>[^)]*)\)'),
-            update(event_type='stream_forwarding')),
+            capture(r'\[(repair|streaming task) #(?P<session_id>[^\]]*)\] Forwarding streaming repair of (?P<ranges>[0-9]*) ranges to (?P<forwarded_endpoint>[^ ]*) \(to be streamed with (?P<target_endpoint>[^)]*)\)'),
+            update(event_category='stream', event_type='forwarding')),
+
+#[streaming task #eeeec140-0e5d-11e5-9302-cb59eafd6434] Received task from /192.168.1.127 to stream 8 ranges to /192.168.1.128
+#[streaming task #3311de40-0f1f-11e5-b498-93de272ebdb9] task succeeded
+#[streaming task #d9a27c00-0e5d-11e5-9302-cb59eafd6434] task succ?eed(ed)?, forwarding response to /192.168.1.127
 
     case('StreamSession'),
 
         rule(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] Streaming error occurred'),
-            update(event_type='stream_session_error')),
+            update(event_category='stream', event_type='session_error')),
 
         rule(
             capture(r'\[Stream #(?P<session_id>[^\]]*)\] Starting streaming to (?P<endpoint>.*)'),
-            update(event_type='stream_begin')),
+            update(event_category='stream', event_type='begin_stream')),
 
     case('StreamReplyVerbHandler'),
 
         rule(
-            capture(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<node>.*)'),
-            update(event_type='stream_sstable_sent')),
+            capture(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<endpoint>.*)'),
+            update(event_category='stream', event_type='sstable_sent')),
 
     case('OutboundTcpConnection'),
 
         rule(
             capture(r'Handshaking version with (?P<endpoint>.*)'),
-            update(event_type='version_handshake')),
+            update(event_category='gossip', event_type='handshake_version')),
 
         rule(
             capture(r'Cannot handshake version with (?P<endpoint>.*)'),
-            update(event_type='version_handshake_failure')),
+            update(event_category='gossip', event_type='handshake_failure')),
 
     case('Gossiper'),
 
         rule(
             capture(r'InetAddress (?P<endpoint>[^ ]*) is now UP'),
-            update(event_type='node_up')),
+            update(event_category='gossip', event_type='node_up')),
 
         rule(
             capture(r'InetAddress (?P<endpoint>[^ ]*) is now DOWN'),
-            update(event_type='node_down')),
+            update(event_category='gossip', event_type='node_down')),
 
         rule(
             capture(r'Node (?P<endpoint>[^ ]*) has restarted, now UP'),
-            update(event_type='node_down')),
+            update(event_category='gossip', event_type='node_restarted')),
+
+        rule(
+            capture(r'Node (?P<endpoint>[^ ]*) is now part of the cluster'),
+            update(event_category='gossip', event_type='node_joined')),
+
+        rule(
+            capture(r'FatClient (?P<endpoint>[^ ]*) has been silent for 30000ms, removing from gossip'),
+            update(event_category='gossip', event_type='remove_silent_client')),
+
+        rule(
+            capture(r'Sleeping for 30000ms to ensure (?P<endpoint>[^ ]*) does not change'),
+            update(event_category='gossip', event_type='sleeping')),
+
+        rule(
+            capture(r'Removing host: (?P<host_id>.*)'),
+            update(event_category='gossip', event_type='node_remove_host')),
+
+        rule(
+            capture(r'Completing removal of (?P<endpoint>[^ ]*)'),
+            update(event_category='gossip', event_type='node_remove_complete')),
+
+        rule(
+            capture(r'Announcing shutdown'),
+            update(event_category='gossip', event_type='announcing_shutdown')),
+
+        rule(
+            capture(r'Gossip stage has (?P<pending_tasks>[0-9]+) pending tasks; skipping status check \(no nodes will be marked down\)'),
+            convert(int, 'pending_tasks'),
+            update(event_category='gossip', event_type='pending_tasks')),
 
     case('SSTableReader'),
 
         rule(
             capture(r'Opening (?P<sstable_name>[^ ]*) \((?P<bytes>[0-9]*) bytes\)'),
             convert(int, 'bytes'),
-            update(event_type='startup_sstable_open')),
+            update(event_category='startup', event_type='sstable_open')),
 
     case('StatusLogger'),
 
         rule(
-            capture(r'Pool Name +Active +Pending +Completed +Blocked +All Time Blocked'),
-            update(event_type='pool_header')),
+            capture(r'Pool Name +Active +Pending( +Completed)? +Blocked( +All Time Blocked)?'),
+            update(event_category='status', event_type='threadpool_header')),
 
         rule(
             capture(r'(?P<pool_name>[A-Za-z_]+) +((?P<active>[0-9]+)|n/a) +(?P<pending>[0-9]+)(/(?P<pending_responses>[0-9]+))?( +(?P<completed>[0-9]+) +(?P<blocked>[0-9]+) +(?P<all_time_blocked>[0-9]+))?'),
             convert(int, 'active', 'pending', 'pending_responses', 'completed', 'blocked', 'all_time_blocked'),
-            update(event_type='pool_status')),
+            update(event_category='status', event_type='threadpool_status')),
 
         rule(
             capture(r'Cache Type +Size +Capacity +KeysToSave(Provider)?'),
-            update(event_type='cache_header')),
+            update(event_category='status', event_type='cache_header')),
 
         rule(
             capture(r'(?P<cache_type>[A-Za-z]*Cache(?! Type)) *(?P<size>[0-9]*) *(?P<capacity>[0-9]*) *(?P<keys_to_save>[^ ]*) *(?P<provider>[A-Za-z_.$]*)'),
             convert(int, 'size', 'capacity'),
-            update(event_type='cache_status')),
+            update(event_category='status', event_type='cache_status')),
 
         rule(
             capture(r'ColumnFamily +Memtable ops,data'),
-            update(event_type='memtable_header')),
+            update(event_category='status', event_type='memtable_header')),
 
 
         rule(
             capture(r'(?P<keyspace>[^.]*)\.(?P<table>[^ ]*) +(?P<ops>[0-9]*),(?P<data>[0-9]*)'),
             convert(int, 'ops', 'data'),
-            update(event_type='memtable_status')),
+            update(event_category='status', event_type='memtable_status')),
 
     case('CommitLogReplayer'),
                 
         rule(
             capture(r'Replaying (?P<commitlog_file>[^ ]*)( \(CL version (?P<commitlog_version>[0-9]*), messaging version (?P<messaging_version>[0-9]*)\))?'),
             convert(int, 'commitlog_version', 'messaging_version'),
-            update(event_type='commitlog_replay_begin')),
+            update(event_category='startup', event_type='begin_commitlog_replay')),
 
         rule(
             capture(r'Finished reading (?P<commitlog_file>.*)'),
-            update(event_type='commitlog_replay_end')),
+            update(event_category='startup', event_type='end_commitlog_replay')),
 
-    case('SecondaryIndexManager'),
+    case('SecondaryIndex', 'SecondaryIndexManager'),
 
         rule(
             capture(r'Creating new index : ColumnDefinition\{(?P<column_definition>[^}]*)\}'),
             convert(split(', '), 'column_definition'),
-            update(event_type='secondary_index_create')),
+            update(event_category='secondary_index', event_type='create')),
 
         rule(
-            capture(r"Submitting index build of \[(?P<keyspace>[^.]*)\.(?P<table>[^\]]*)\] for data in (?P<sstables>.*)"),
+            capture(r"Submitting index build of \[?(?P<keyspace>[^.]*)\.(?P<table>[^\] ]*)\]? for data in (?P<sstables>.*)"),
             convert(sstables, 'sstables'),
-            update(event_type='secondary_index_build_begin')),
+            update(event_category='secondary_index', event_type='submit_build')),
 
         rule(
-            capture(r'Index build of \[(?P<keyspace>[^.]*)\.(?P<table>[^\]]*)\] complete'),
-            update(event_type='secondary_index_build_end')),
+            capture(r'Index build of \[?(?P<keyspace>[^.]*)\.(?P<table>[^\] ]*)\]? complete'),
+            update(event_category='secondary_index', event_type='build_complete')),
+
+    case('WorkPool'),
+
+        rule(
+            capture(r'Throttling at (?P<work_requests>[0-9]*) work requests per second with target total queue size at (?P<target_queue_size>[0-9]*)'),
+            convert(int, 'work_requests', 'target_queue_size'),
+            update(event_category='solr', event_type='backpressure_throttling')),
+
+        rule(
+            capture(r'Back pressure is active for (work pool )?(?P<work_pool>[^ ]*) (work pool )?with total work queue size (?P<queue_size>[0-9]*) and average processing time (?P<processing_time>[0-9]*)'),
+            convert(int, 'queue_size', 'processing_time'),
+            update(event_category='solr', event_type='backpressure_active')),
+
+        rule(
+            capture(r'Back pressure disabled for work pool Index'),
+            update(event_category='solr', event_type='backpressure_disabled')),
 
     case('ShardRouter'),
 
         rule(
             capture(r'Updating shards state due to endpoint (?P<endpoint>[^ ]*) changing state (?P<state>.*)'),
-            update(event_type='solr_shard_state_change')),
+            update(event_category='solr', event_type='shard_state_change')),
+
+        rule(
+            capture(r'Found routing endpoint: (?P<endpoint>[^ ]*)'),
+            update(event_category='solr', event_type='shard_routing_found_endpoint')),
+
+        rule(
+            capture(r'Added live routing endpoint (?P<endpoint>[^ ]*) for range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\]'),
+            update(event_category='solr', event_type='shard_routing_added_endpoint')),
 
     case('QueryProcessor'),
 
         rule(
             capture(r'Column definitions for (?P<keyspace>[^.]*)\.(?P<table>[^ ]*) changed, invalidating related prepared statements'),
-            update(event_type='solr_column_definition_changed')),
+            update(event_category='solr', event_type='column_definition_changed')),
 
         rule(
             capture(r'Keyspace (?P<keyspace>[^ ]*) was dropped, invalidating related prepared statements'),
-            update(event_type='solr_keyspace_dropped')),
+            update(event_category='solr', event_type='keyspace_dropped')),
 
         rule(
             capture(r'Table (?P<keyspace>[^.]*)\.(?P<table>[^ ]*) was dropped, invalidating related prepared statements'),
-            update(event_type='solr_table_dropped')),
+            update(event_category='solr', event_type='table_dropped')),
+
+    case('IndexSchema'),
+
+        rule(
+            capture(r'\[null\] Schema name=(?P<schema_name>.*)'),
+            update(event_category='solr', event_type='schema_name')),
+
+        rule(
+            capture(r'Reading Solr Schema from (?P<schema_file>.*)'),
+            update(event_category='solr', event_type='reading_schema_file')),
+
+        rule(
+            capture(r'unique key field: (?P<unique_key_field>.*)'),
+            update(event_category='solr', event_type='unique_key_field')),
+
+        rule(
+            capture(r'default search field in schema is (?P<default_field>.*)'),
+            update(event_category='solr', event_type='default_search_field')),
+
+    case('Cql3CassandraSolrSchemaUpdater'),
+
+        rule(
+            capture(r'No Cassandra column found for field: (?P<field_name>.*)'),
+            update(event_category='solr', event_type='missing_cassandra_column')),
+
+    case('XMLLoader', 'XSLTResponseWriter'),
+
+        rule(
+            capture('xsltCacheLifetimeSeconds=(?P<lifetime_seconds>[0-9]*)'),
+            update(event_category='solr', event_type='xslt_cache_lifetime')),
+
+    case('SolrResourceLoader'),
+
+        rule(
+            capture(r'using system property solr.solr.home: (?P<solr_home>.*)'),
+            update(event_category='solr', event_type='home_system_property')),
+
+        rule(
+            capture(r'No /solr/home in JNDI'),
+            update(event_category='solr', event_type='home_jndi_missing')),
+
+        rule(
+            capture(r"new SolrResourceLoader for (?P<loader_type>[^:]*): '(?P<solr_home>[^']*)'"),
+            update(event_category='solr', event_type='resource_loader')),
 
     case('SolrCoreResourceManager'),
 
         rule(
+            capture(r"Delete resources for core '(?P<keyspace>[^.]*)\.(?P<table>[^']*)' from 'solr_admin.solr_resources'"),
+            update(event_category='solr', event_type='delete_resource')),
+
+        rule(
             capture(r"Wrote resource '(?P<resource>[^']*)' for core '(?P<keyspace>[^.]*)\.(?P<table>[^']*)'"),
-            update(event_type='solr_write_resource')),
+            update(event_category='solr', event_type='write_resource')),
+
+        rule(
+            capture(r'Trying to load resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) by looking for legacy resources...'),
+            update(event_category='solr', event_type='load_resource_legacy')),
 
         rule(
             capture(r'Trying to load resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) by querying from local node with CL (?P<consistency_level>.*)'),
-            update(event_type='solr_load_resource_attempt')),
+            update(event_category='solr', event_type='load_resource_query')),
 
         rule(
             capture(r'Successfully loaded resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*)'),
-            update(event_type='solr_load_resource_success')),
+            update(event_category='solr', event_type='load_resource_success')),
 
         rule(
-            capture(r'No resource (?P<resource>[^ ]*) found for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) on any live node\.'),
-            update(event_type='solr_load_resource_failure')),
+            capture(r'No resource (?P<resource>[^ ]*) found for core (?P<keyspace>[^.]*).(?P<table>[^ ]*).*'),
+            update(event_category='solr', event_type='load_resource_failure')),
 
         rule(
             capture(r'Creating core: (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_create_core')),
+            update(event_category='solr', event_type='create_core')),
+
+        rule(
+            capture(r'Composite keys are not supported on Thrift-compatible tables: (?P<composite_key>.*)'),
+            update(event_category='solr', event_type='thrift_composite_key_error')),
+
+#Reloading core: zendesk.organizations
+#Successfully loaded resources for core zendesk.organizations by querying from local node.
+#Trying to load resources for core zendesk.tickets by querying from local node with CL QUORUM
+#Successfully loaded 2 resources for core zendesk.organizations
+#Unsupported schema version (1.0). Please use version '1.1' or greater.
+#Plugin init failure for [schema.xml] fieldType "text_classes": Plugin init failure for [schema.xml] analyzer/tokenizer: Error instantiating class: 'org.apache.lucene.analysis.pattern.PatternTokenizerFactory'. Schema file is solr/conf/schema.xml
+#Ignoring request trying to reload not existent core: zendesk.organizations
+#Ignoring request trying to create already existent core: zendesk.ticket_comments
 
     case('AbstractSolrSecondaryIndex'),
 
         rule(
             capture(r'Configuring index commit log for (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_configure_index_commitlog')),
+            update(event_category='solr', event_type='configure_index_commitlog')),
 
         rule(
             capture(r'Configuring index metrics for (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_configure_index_metrics')),
+            update(event_category='solr', event_type='configure_index_metrics')),
 
         rule(
             capture(r'Ensuring existence of index directory (?P<index_directory>.*)'),
-            update(event_type='solr_ensure_index_directory')),
+            update(event_category='solr', event_type='ensure_index_directory')),
 
         rule(
             capture(r'Executing hard commit on index (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_execute_hard_commit')),
+            update(event_category='solr', event_type='execute_hard_commit')),
 
         rule(
             capture(r'Loading core on keyspace (?P<keyspace>[^ ]*) and column family (?P<table>.*)'),
-            update(event_type='solr_load_core')),
+            update(event_category='solr', event_type='load_core')),
 
         rule(
             capture(r'No commit log entries for core (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_no_commitlog_entries')),
+            update(event_category='solr', event_type='no_commitlog_entries')),
 
         rule(
             capture(r'Start index TTL scheduler for (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_start_index_ttl_scheduler')),
+            update(event_category='solr', event_type='start_index_ttl_scheduler')),
 
         rule(
             capture(r'Start index initializer for (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_start_index_initializer')),
+            update(event_category='solr', event_type='start_index_initializer')),
 
         rule(
             capture(r'Start index reloader for (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_start_index_reloader')),
+            update(event_category='solr', event_type='start_index_reloader')),
 
         rule(
             capture(r'Start indexing pool for (?P<keyspace>[^.]*).(?P<table>.*)'),
-            update(event_type='solr_start_indexing_pool')),
-
-    case('YamlConfigurationLoader'),
-            
-        rule(
-            capture(r'Loading settings from file:(?P<yaml_file>.*)'),
-            update(event_type='config_load_settings')),
+            update(event_category='solr', event_type='start_indexing_pool')),
 
         rule(
-            capture(r'Node configuration:\[(?P<node_configuration>.*)\]'),
-            convert(split('; '), 'node_configuration'),
-            update(event_type='config_output')),
-
-    case('Worker'),
+            capture(r'Waiting for DSE to startup \(if not already done\) and activate index on keyspace (?P<keyspace>[^ ]*) and column family (?P<table>.*)'),
+            update(event_category='solr', event_type='startup_wait')),
 
         rule(
-            capture(r'Shutting down work pool worker!'),
-            update(event_type='work_pool_shutdown')),
+            capture(r'Reindexing on keyspace (?P<keyspace>[^ ]*) and column family (?P<table>.*)'),
+            update(event_category='solr', event_type='reindexing')),
+
+        rule(
+            capture(r'Invalidating index (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='invalidating_index')),
+
+        rule(
+            capture(r'Deleting all documents from index (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='delete_all_documents')),
+
+        rule(
+            capture(r'Truncating index (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='truncate_index')),
+
+        rule(
+            capture(r'Flushing commit log for core (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='flushing_commit_log')),
+
+        rule(
+            capture(r'Enabling index updates for core (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='enable_index_updates')),
+
+        rule(
+            capture(r'Solr validation error for row\(\[(?P<row>[^\]]*)\]\), field\((?P<field>[^)]*)\), type\((?P<type>[^)]*)\), error: (?P<error>.*)'),
+            update(event_category='solr', event_type='validation_error')),
+
+        rule(
+            capture(r'Increasing soft commit max time to (?P<max_time>[0-9]+)'),
+            convert(int, 'max_time'),
+            update(event_category='solr', event_type='increasing_soft_commit')),
+
+        rule(
+            capture(r'Restoring soft commit max time back to (?P<max_time>[0-9]+)'),
+            convert(int, 'max_time'),
+            update(event_category='solr', event_type='restoring_soft_commit')),
+
+    case('DSESearchProperties'),
+
+        rule(
+            capture(r'Using default DSE search properties for Solr core (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='default_search_properties')),
+
+        rule(
+            capture(r'Refreshed DSE search properties for: (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='refresh_search_properties')),
+
+    case('CassandraShowFileRequestHandler'),
+
+        rule(
+            capture(r"Couldn't find resource: (?P<resource>[^,]*), ignoring..."),
+            update(event_category='solr', event_type='resource_not_found')),
+
+    case('CoreContainer'),
+
+        rule(
+            capture('Shutting down CoreContainer instance=(?P<instance>[0-9]*)'),
+            convert(int, 'instance'),
+            update(event_category='solr', event_type='corecontainer_shutdown')),
+
+        rule(
+            capture('New CoreContainer (?P<instance>[0-9]*)'),
+            convert(int, 'instance'),
+            update(event_category='solr', event_type='corecontainer_new')),
+
+        rule(
+            capture('registering core: (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='registering_core')),
+
+        rule(
+            capture('replacing core: (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='replacing_core')),
+
+    case('CassandraCoreContainer'),
+
+        rule(
+            capture(r'WARNING: stored copy fields are deprecated, found stored copy field destination: (?P<field>[^{]*){type=(?P<type>[^,]*),properties=(?P<properties>[^}]*)}. All stored copy fields will be considered non-stored'),
+            update(event_category='solr', event_type='stored_copy_field_warning')),
 
     case('SolrDispatchFilter'),
 
         rule(
+            capture(r'SolrDispatchFilter.init\(\)'),
+            update(event_category='solr', event_type='begin_init_dispatch_filter')),
+
+        rule(
             capture(r'SolrDispatchFilter.init\(\) done'),
-            update(event_type='solr_dispatch_filter_init_done')),
+            update(event_category='solr', event_type='end_init_dispatch_filter')),
+
+        rule(
+            capture(r'Error request exception: (?P<error>.*)'),
+            update(event_category='solr', event_type='error_request_exception')),
 
         rule(
             capture(r'Error request params: (?P<params>.*)'),
             convert(split('&'), 'params'),
-            update(event_type='solr_error_request_params')),
+            update(event_category='solr', event_type='error_request_params')),
 
         rule(
             capture(r'\[admin\] webapp=(?P<webapp>[^ ]*) path=(?P<path>[^ ]*) params=\{(?P<params>[^}]*)\} status=(?P<status>[0-9]*) QTime=(?P<qtime>[0-9]*)'),
             convert(split('&'), 'params'),
             convert(int, 'status', 'qtime'),
-            update(event_type='solr_admin')),
+            update(event_category='solr', event_type='admin')),
 
         rule(
             capture(r'user.dir=(?P<user_dir>.*)'),
-            update(event_type='solr_user_dir')),
+            update(event_category='solr', event_type='user_dir')),
+
+    case('JmxMonitoredMap'),
+
+        rule(
+            capture(r'JMX monitoring is enabled. Adding Solr mbeans to JMX Server: (?P<mbean_class>[^@]*)@(?P<mbean_hash>.*)'),
+            update(event_category='solr', event_type='adding_mbeans')),
+
+        rule(
+            capture(r'Could not (?P<mbean_operation>[^ ]*) on info bean (?P<mbean_class>[^@]*)'),
+            update(event_category='solr', event_type='mbean_error')),
+
+    case('RequestHandlers'),
+
+        rule(
+            capture('Multiple requestHandler registered to the same name: (?P<path>[^ ]*) ignoring: (?P<ignored_class>.*)'),
+            update(event_category='solr', event_type='ignore_multiple_request_handlers')),
+
+    case('SolrException'),
+        
+        rule(
+            capture(r'.*'),
+            update(event_category='solr', event_type='exception')),
+
+    case('SolrConfig'),
+
+        rule(
+            capture(r'Using Lucene MatchVersion: (?P<matchversion>.*)'),
+            update(event_category='solr', event_type='lucene_matchversion')),
+
+        rule(
+            capture(r'Loaded SolrConfig: (?P<solrconfig>.*)'),
+            update(event_category='solr', event_type='load_solrconfig')),
+
+    case('CachingDirectoryFactory'),
+
+        rule(
+            capture(r'return new directory for (?P<directory>.*)'),
+            update(event_category='solr', event_type='return_new_directory')),
+
+        rule(
+            capture(r'Closing directory: (?P<directory>.*)'),
+            update(event_category='solr', event_type='closing_directory')),
+
+        rule(
+            capture(r'Timeout waiting for all directory ref counts to be released - gave up waiting on CachedDir<<refCount=(?P<ref_count>[0-9]*);path=(?P<path>[^;]*);done=(?P<done>[^>]*)>>'),
+            convert(int, 'ref_count'),
+            update(event_category='solr', event_type='close_directory_pending')),
+
+        rule(
+            capture(r'looking to close (?P<directory>[^ ]*) \[CachedDir<<refCount=(?P<ref_count>[0-9]*);path=(?P<path>[^;]*);done=(?P<done>[^>]*)>>\]'),
+            convert(int, 'ref_count'),
+            update(event_category='solr', event_type='close_directory_pending')),
+
+        rule(
+            capture(r'Closing (?P<directory_factory>[^ ]*) - (?P<directory_count>[0-9]*) directories currently being tracked'),
+            convert(int, 'ref_count'),
+            update(event_category='solr', event_type='close_directory_factory')),
+
+    case('YamlConfigurationLoader'),
+            
+        rule(
+            capture(r'Loading settings from file:(?P<yaml_file>.*)'),
+            update(event_category='startup', event_type='config_file')),
+
+        rule(
+            capture(r'Node configuration:\[(?P<node_configuration>.*)\]'),
+            convert(split('; '), 'node_configuration'),
+            update(event_category='startup', event_type='config_settings')),
+
+    case('DatabaseDescriptor'),
+
+#commit_failure_policy is stop
+#Data files directories: [/mnt/cassandra/data]
+#DiskAccessMode 'auto' determined to be mmap, indexAccessMode is mmap
+#Commit log directory: /mnt/cassandra/commitlog
+#Not using multi-threaded compaction
+#disk_failure_policy is stop
+#Global memtable threshold is enabled at 4800MB
+#Global memtable off-heap threshold is enabled at 4900MB
+#Global memtable on-heap threshold is enabled at 4800MB
+#Loading settings from file:/mnt/vm/cassandra-dse/resources/cassandra/conf/cassandra.yaml
+#Legacy authentication config found. Existing authentication data will be migrated to a system keyspace.
+
+    case('Worker'),
+
+        rule(
+            capture(r'Shutting down work pool worker!'),
+            update(event_category='solr', event_type='work_pool_shutdown')),
+
+    case('LeaderManagerWatcher'),
+
+        rule(
+            capture(r'OH GOD'),
+            update(event_category='jobtracker', event_type='leader_manager_exception')),
+
+#10.1.40.12/10.1.40.12: Leader HadoopJT.Analytics changed from /10.1.40.11 to /10.1.40.11 [external] [notified 1 listeners]
+#10.1.40.13/10.1.40.13: Leader Analytics.HadoopJT changed from <null> to /10.1.40.10 [external] [notified 1 listeners]
+#10.1.40.13/10.1.40.13: new listener for Analytics.HadoopJT initialized to /10.1.40.10
+#Couldn't run initialization block
 
     case('ExternalLogger', 'SparkWorker-0 ExternalLogger'),
 
         rule(
-            capture(r'(?P<source>[^:]*): (?P<message>.*)'),
-            update(event_type='spark_external_logger')),
+            capture(r'.*'),
+            update(event_category='spark', event_type='external_logger')),
 
 #SparkMaster: Adding host 10.1.40.10 (Analytics)	
 #SparkMaster: Ignoring remote host 10.1.0.20 (Cassandra)	
@@ -493,203 +860,326 @@ capture_message = switch(
         rule(
             capture(r'Started Spark Worker, connected to master (?P<master_host>[^:]*):(?P<master_port>[0-9]+)'),
             convert(int, 'master_port'),
-            update(event_type='spark_worker_started')),
+            update(event_category='spark', event_type='worker_started')),
 
         rule(
-            capture(r'Spark Master not ready yet at (?P<master_host>[^:]*):(?P<master_port>[0-9]+)\.\.\.'),
+            capture(
+                r'Spark Master not ready( yet)? at (?P<master_host>[^:]*):(?P<master_port>[0-9]+).*',
+                r'Spark Master not ready( yet)? at \(no configured master\)'),
             convert(int, 'master_port'),
-            update(event_type='spark_master_not_ready')),
+            update(event_category='spark', event_type='master_not_ready')),
 
     case('AbstractSparkRunner'),
 
         rule(
             capture(r'Starting Spark process: (?P<process>.*)'),
-            update(event_type='spark_process_starting')),
+            update(event_category='spark', event_type='process_starting')),
 
         rule(
-            capture(r'Process (?P<process>[^ ]) has just received (?P<signal>.*)'),
-            update(event_type='spark_received_signal')),
+            capture(r'Process (?P<process>[^ ]*) has just received (?P<signal>.*)'),
+            update(event_category='spark', event_type='received_signal')),
 
         rule(
             capture(r'(?P<process>[^ ]*) threw exception in state (?P<state>[^:]*):'),
-            update(event_type='spark_process_exception')),
+            update(event_category='spark', event_type='process_exception')),
 
     case('JobTrackerManager'),
 
         rule(
             capture(r'Failed to retrieve jobtracker locations at CL.(?P<consistency_level>[^ ]*) \((?P<error>[^)]*)\)'),
-            update(event_type='jobtracker_location_failure')),
+            update(event_category='jobtracker', event_type='location_failure')),
 
     case('SliceQueryFilter'),
 
         rule(
-            capture(r'Scanned over (?P<tombstoned_cells>[0-9]*) tombstones in (?P<keyspace>[^.]*).(?P<table>[^ ]*); query aborted \(see tombstone_failure_threshold\)'),
+            capture(r'Scanned over (?P<tombstoned_cells>[0-9]*) tombstones in (?P<keyspace>[^.]*).(?P<table>[^;]*); query aborted \(see tombstone_failure_threshold\)'),
             convert(int, 'live_cells', 'tombstoned_cells', 'requested_columns'),
             convert(split(', '), 'deletion_info'),
-            update(event_type='tombstone_warning')),
+            update(event_category='tombstone', event_type='warning_threshold_exceeded')),
 
         rule(
-            capture(r'Read (?P<live_cells>[0-9]*) live and (?P<tombstoned_cells>[0-9]*) tombstoned cells in (?P<keyspace>[^.]*).(?P<table>[^ ]*) \(see tombstone_warn_threshold\). (?P<requested_columns>[0-9]*) columns was requested, slices=\[(?P<slice_start>[^-]*)-(?P<slice_end>[^\]]*)\], delInfo=\{(?P<deletion_info>[^}]*)\}'),
+            capture(r'Read (?P<live_cells>[0-9]*) live and (?P<tombstoned_cells>[0-9]*) tombstoned? cells in (?P<keyspace>[^.]*).(?P<table>[^ ]*)( for key: (?P<key>[^ ]*))? \(see tombstone_warn_threshold\). (?P<requested_columns>[0-9]*) columns (was|were) requested, slices=\[(?P<slice_start>[^-]*)-(?P<slice_end>[^\]]*)\](, delInfo=\{(?P<deletion_info>[^}]*)\})?'),
             convert(int, 'live_cells', 'tombstoned_cells', 'requested_columns'),
             convert(split(', '), 'deletion_info'),
-            update(event_type='tombstone_warning')),
+            update(event_category='tombstone', event_type='error_threshold_exceeded')),
 
     case('BatchStatement'),
 
         rule(
             capture(r'Batch of prepared statements for \[(?P<keyspace>[^.]*).(?P<table>[^\]]*)\] is of size (?P<batch_size>[0-9]*), exceeding specified threshold of (?P<batch_warn_threshold>[0-9]*) by (?P<threshold_exceeded_by>[0-9]*).'),
             convert(int, 'batch_size', 'batch_warn_threshold', 'threshold_excess'),
-            update(event_type='batch_size_warning')),
+            update(event_category='batch', event_type='size_warning')),
     
+    case('CustomTThreadPoolServer'),
+
+        rule(
+            capture(r'Error occurred during processing of message.'),
+            update(event_category='thrift', event_type='message_processing_error')),
+
+    case('TNegotiatingServerTransport'),
+
+        rule(
+            capture(r'Using TFramedTransport with a max frame size of (\{\}|(?P<max_frame_size>[0-9]*)) bytes.'),
+            convert(int, 'max_frame_size'),
+            update(event_category='thrift', event_type='max_frame_size')),
+
+        rule(
+            capture(r'Failed to open server transport.'),
+            update(event_category='thrift', event_type='transport_open_error')),
+
+    case('Message'),
+
+       rule(
+            capture(r'Read an invalid frame size of (?P<frame_size>[0-9-]*). Are you using TFramedTransport on the client side\?'),
+            convert(int, 'frame_size'),
+            update(event_category='thrift', event_type='invalid_frame_size')),
+
+       rule(
+            capture(r'Got an IOException in internalRead!'),
+            update(event_category='thrift', event_type='receive_exception')),
+
+       rule(
+            capture(r'Got an IOException during write!'),
+            update(event_category='thrift', event_type='send_exception')),
+
+#Invalid frame size got (50331648), maximum expected 15728640
+#Unexpected exception during request; channel = [id: 0xbf0f3165, /127.0.0.1:49506 => /127.0.0.1:9042]
+
+    case('ThriftServer'),
+
+#Stop listening to thrift clients
+#Listening for thrift clients...
+#Binding thrift service to /10.65.131.221:9160
+
+    case('Server'),
+
+#Stop listening for CQL clients
+#Using Netty Version: [netty-buffer=netty-buffer-4.0.23.Final.208198c, netty-codec=netty-codec-4.0.23.Final.208198c, netty-codec-http=netty-codec-http-4.0.23.Final.208198c, netty-codec-socks=netty-codec-socks-4.0.23.Final.208198c, netty-common=netty-common-4.0.23.Final.208198c, netty-handler=netty-handler-4.0.23.Final.208198c, netty-transport=netty-transport-4.0.23.Final.208198c, netty-transport-rxtx=netty-transport-rxtx-4.0.23.Final.208198c, netty-transport-sctp=netty-transport-sctp-4.0.23.Final.208198c, netty-transport-udt=netty-transport-udt-4.0.23.Final.208198c]
+#Starting listening for CQL clients on /0.0.0.0:9042...
+#Netty using native Epoll event loop
+#Netty using Java NIO event loop
+#jetty-8.y.z-SNAPSHOT
+
     case('MeteredFlusher'),
 
         rule(
-            capture(r"Flushing high-traffic column family CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) \(estimated (?P<estimated_bytes>[0-9]*) bytes\)"),
+            capture(r"[Ff]lushing high-traffic column family CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) \(estimated (?P<estimated_bytes>[0-9]*) bytes\)"),
             convert(int, 'estimated_bytes'),
-            update(event_type='flush_metered')),
+            update(event_category='flush', event_type='metered')),
         
     case('Validator', 'AntiEntropyService'),
 
         rule(
-            capture(r'\[repair #(?P<session_id>[^\]]*)\] Sending completed merkle tree to (?P<node>[^ ]*) for \(?(?P<keyspace>[^,]*)[/,](?P<table>[^)]*)\)?'),
-            update(event_type='repair_merkle_sent')), 
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] Sending completed merkle tree to (?P<endpoint>[^ ]*) for \(?(?P<keyspace>[^,]*)[/,](?P<table>[^)]*)\)?'),
+            update(event_category='repair', event_type='merkle_sent')), 
 
     case('HintedHandOffManager'),
 
         rule(
             capture(r'Finished hinted handoff of (?P<rows>[0-9]*) rows to endpoint (?P<endpoint>.*)'),
             convert(int, 'rows'),
-            update(event_type='hinted_handoff_end')),
+            update(event_category='hinted_handoff', event_type='end_handoff')),
 
         rule(
             capture(r'Started hinted handoff for host: (?P<host_id>[^ ]*) with IP: (?P<endpoint>.*)'),
-            update(event_type='hinted_handoff_begin')),
+            update(event_category='hinted_handoff', event_type='begin_handoff')),
 
         rule(
             capture(r'Timed out replaying hints to (?P<endpoint>.*); aborting \((?P<hints_delivered>[0-9]*) delivered\)'),
             convert(int, 'hints_delivered'),
-            update(event_type='hinted_handoff_timeout')),
+            update(event_category='hinted_handoff', event_type='hint_timeout')),
+
+#Could not truncate all hints.
+#Truncating all stored hints.
+#Deleting any stored hints for /10.1.0.14
+
+    case('HintedHandoffMetrics'),
+
+        rule(
+            capture(r'(?P<endpoint>) has (?P<hints_dropped>[0-9]*) dropped hints, because node is down past configured hint window.'),
+            convert(int, 'hints_dropped'),
+            update(event_category='hinted_handoff', event_type='hints_dropped')),
+
+    case('PluginLocator'),
+
+        rule(
+            capture(r'Scanning jar:(?P<jar>[^ ]*) for DSE plugins'),
+            update(event_category='plugin', event_type='scanning_jar')),
 
     case('PluginManager'),
 
         rule(
             capture(r'Plugin activated: (?P<plugin_class>.*)'),
-            update(event_type='plugin_activated')),
+            update(event_category='plugin', event_type='activated')),
 
         rule(
             capture(r'Registered plugin (?P<plugin_class>.*)'),
-            update(event_type='plugin_registered')),
+            update(event_category='plugin', event_type='registered')),
 
         rule(
             capture(r'Deactivating plugin: (?P<plugin_class>.*)'),
-            update(event_type='plugin_deactivating')),
+            update(event_category='plugin', event_type='deactivating')),
 
         rule(
             capture(r'Activating plugin: (?P<plugin_class>.*)'),
-            update(event_type='plugin_activating')),
+            update(event_category='plugin', event_type='activating')),
 
         rule(
             capture(r'All plugins are stopped.'),
-            update(event_type='plugin_all_stopped')),
+            update(event_category='plugin', event_type='all_stopped')),
+
+    case('AsyncSnapshotInfoBean'),
+
+        rule(
+            capture('(?P<metric>[^ ]*) plugin using (?P<async_writers>[0-9]*) async writers'),
+            convert(int, 'async_writers'),
+            update(event_category='metric', event_type='async_writers')),
+
+    case('SnapshotInfoBean'),
+
+        rule(
+            capture('(?P<metric>[^ ]) refresh rate set to (?P<new_refresh_rate>[0-9]*) \(was (?P<old_refresh_rate>[0-9]*)\)'),
+            convert(int, 'new_refresh_rate', 'old_refresh_rate'),
+            update(event_category='metric', event_type='refresh_rate_set')),
+
+    case('ExplicitTTLSnapshotInfoBean'),
+
+        rule(
+            capture('Setting TTL to (?P<ttl>[0-9]*)'),
+            convert(int, 'ttl'),
+            update(event_category='metric', event_type='ttl_set')),
 
     case('AutoSavingCache'),
 
         rule(
             capture(r'Saved (?P<cache_type>[^ ]*) \((?P<cache_items>[0-9]*) items\) in (?P<save_duration>[0-9]*) ms'),
             convert(int, 'cache_items', 'save_duration'),
-            update(event_type='cache_saved')),
+            update(event_category='cache', event_type='cache_saved')),
 
         rule(
             capture(r'reading saved cache (?P<cache_file>.*)'),
-            update(event_type='cache_read')),
+            update(event_category='cache', event_type='cache_read')),
+
+    case('CacheService'),
+
+#Scheduling counter cache save to every 7200 seconds (going to save all keys).
+#Scheduling row cache save to each 0 seconds (going to save all keys).
+#Scheduling key cache save to each 14400 seconds (going to save all keys).
+#Initializing key cache with capacity of 100 MBs.
+#Initializing counter cache with capacity of 50 MBs
+#Initializing row cache with capacity of 0 MBs
+#Initializing row cache with capacity of 0 MBs and provider org.apache.cassandra.cache.SerializingCacheProvider
 
     case('MigrationTask'),
 
         rule(
             capture(r"Can't send migration request: node (?P<endpoint>[^ ]*) is down."),
-            update(event_type='migration_request_failure')),
+            update(event_category='migration', event_type='request_failure')),
 
     case('MigrationManager'),
 
         rule(
             capture(r"Drop Keyspace '(?P<keyspace>[^']*)'"),
-            update(event_type='migration_drop_keyspace')),
+            update(event_category='migration', event_type='drop_keyspace')),
 
         rule(
             capture(r"Update ColumnFamily '(?P<keyspace>[^/]*)/(?P<table>[^']*)' From org.apache.cassandra.config.CFMetaData@(?P<old_hash>[^\]]*)\[(?P<old_metadata>.*)\] To org.apache.cassandra.config.CFMetaData@(?P<new_hash>[^\]]*)\[(?P<new_metadata>.*)\]"),
-            update(event_type='migration_update_table')),
+            update(event_category='migration', event_type='update_table')),
 
         rule(
             capture(r"Create new ColumnFamily: org.apache.cassandra.config.CFMetaData@(?P<hash>[^\]]*)\[(?P<metadata>.*)\]"),
-            update(event_type='migration_create_table')),
+            update(event_category='migration', event_type='create_table')),
 
         rule(
             capture(r"Create new Keyspace: KSMetaData\{(?P<metadata>.*)\}"),
-            update(event_type='migration_create_keyspace')),
+            update(event_category='migration', event_type='create_keyspace')),
 
     case('DefsTables'),
 
         rule(
             capture(r'Loading org.apache.cassandra.config.CFMetaData@(?P<hash>[^\]]*)\[(?P<metadata>.*)\]'),
-            update(event_type='migration_load_table_metadata')),
+            update(event_category='migration', event_type='load_table_metadata')),
 
     case('StorageService'),
 
+
         rule(
             capture(r'Node (?P<endpoint>[^ ]*) state jump to normal'),
-            update(event_type='node_state_normal')),
+            update(event_category='gossip', event_type='node_state_normal')),
 
         rule(
             capture(r'Repair session (?P<session_id>[^\]]*) for range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] finished'),
             convert(int, 'range_begin', 'range_end'),
-            update(event_type='repair_session_finished')),
+            update(event_category='repair', event_type='session_finished')),
 
         rule(
             capture(r'Repair session (?P<session_id>[^\]]*) for range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] failed with error (?P<error>)'),
             convert(int, 'range_begin', 'range_end'),
-            update(event_type='repair_session_failure')),
+            update(event_category='repair', event_type='session_failure')),
 
         rule(
             capture(r'Repair session failed:'),
-            update(event_type='repair_session_failure')),
+            update(event_category='repair', event_type='session_failure')),
 
         rule(
             capture(r'Starting up server gossip'),
-            update(event_type='startup_gossip_starting')),
+            update(event_category='startup', event_type='gossip_starting')),
 
         rule(
             capture(r'Loading persisted ring state'),
-            update(event_type='startup_loading_ring_state')),
+            update(event_category='startup', event_type='loading_ring_state')),
 
         rule(
             capture(r'Thrift API version: (?P<version>.*)'),
-            update(event_type='startup_thrift_api_version')),
+            update(event_category='startup', event_type='thrift_api_version')),
 
         rule(
             capture(r'CQL supported versions: (?P<supported_versions>[^ ]*) \(default: (?P<default_version>[^)]*)\)'),
             convert(split(','), 'supported_versions'),
-            update(event_type='startup_cql_version')),
+            update(event_category='startup', event_type='cql_version')),
 
         rule(
             capture(r'Cassandra version: (?P<version>.*)'),
-            update(event_type='startup_cassandra_version')),
+            update(event_category='startup', event_type='cassandra_version')),
 
         rule(
             capture(r'Using saved tokens \[(?P<tokens>[^\]]*)\]'),
             convert(split(','), 'tokens'),
-            update(event_type='startup_using_saved_tokens')),
+            update(event_category='startup', event_type='using_saved_tokens')),
 
         rule(
             capture(r'setstreamthroughput: throttle set to (?P<stream_throughput>[0-9]*)'),
             convert(int, 'stream_throughput'),
-            update(event_type='node_set_stream_throughput')),
+            update(event_category='config', event_type='stream_throughput')),
+
+#Flushing CFS(Keyspace='MSA', ColumnFamily='subinfo') to relieve memory pressure
+#adding secondary index users.happinessscore to operation
+#Starting repair command #8, repairing 611 ranges for keyspace OpsCenter
+#Starting repair command #3, repairing 32 ranges for keyspace exchangesf (parallelism=SEQUENTIAL, full=true)
+#Node /10.1.0.21 state jump to bootstrap
+#Removal not confirmed for for 10.1.40.10/10.1.40.10,/10.1.40.11
+#Endpoint /10.1.0.13 is down and will not receive data for re-replication of /10.1.40.15
+#Removing tokens [-8467373500947642860, -6918355872246382064] for /10.1.40.15
+#starting user-requested repair of range \[\(6358927983839558859,6362741398290227435\]\] for keyspace dse_security and column families \[tokens\]
+#DRAINING: starting drain process
+#DRAINED
+#Cannot drain node \(did it already happen\?\)
+#Removal not confirmed for for 10.1.40.10/10.1.40.10,/10.1.40.11
+#Stopping gossip by operator request
+#Starting gossip by operator request
+#Startup completed! Now serving reads.
 
     case('MessagingService'),
 
         rule(
             capture(r'(?P<messages_dropped>[0-9]*) (?P<message_type>[^ ]*) messages dropped in last 5000ms'),
             convert(int, 'messages_dropped'),
-            update(event_type='messages_dropped')))
+            update(event_category='status', event_type='messages_dropped'))))
+
+#Starting Messaging Service on port 7000
+#MessagingService has terminated the accept() thread
+#Waiting for messaging service to quiesce
+#MessagingService shutting down server thread.
 
 def update_message(fields):
     subfields = capture_message(fields['source_file'][:-5], fields['message'])
@@ -703,7 +1193,7 @@ capture_line = rule(
     convert(date('%Y-%m-%d %H:%M:%S,%f'), 'date'),
     convert(int, 'source_line'),
     update_message,
-    default(event_type='unknown'))
+    default(event_category='unknown', event_type='unknown'))
 
 def parse_log(lines, **extras):
     fields = None

@@ -14,6 +14,7 @@ create table logparse.systemlog (
 	source_file text,
 	source_line bigint,
 	message text,
+	event_category text,
 	event_type text,
 	exception text,
 	b_ map<text, boolean>,
