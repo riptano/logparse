@@ -13,7 +13,7 @@ capture_message = switch(
 
         rule(
             capture(r'JVM vendor/version: (?P<jvm>.*)'), 
-            update(event_type='startup_jvm')),
+            update(event_type='startup_jvm_vendor')),
 
         rule(
             capture(r'Heap size: (?P<heap_used>[0-9]*)/(?P<total_heap>[0-9]*)'), 
@@ -25,49 +25,62 @@ capture_message = switch(
             convert(split(':'), 'classpath'),
             update(event_type='startup_classpath')),
 
-#(?P<memory_type>.*) memory: init = [0-9]*\([0-9]*K\) used = [0-9]*\([0-9]*K\) committed = [0-9]*\([0-9]*K\) max = [0-9-]*\([0-9-]*K\)
-#CMS Old Gen Heap memory: init = 3456106496(3375104K) used = 0(0K) committed = 3456106496(3375104K) max = 3456106496(3375104K)
-#Code Cache Non-heap memory: init = 2555904(2496K) used = 7276480(7105K) committed = 7340032(7168K) max = 251658240(245760K)
-#Compressed Class Space Non-heap memory: init = 0(0K) used = 3162984(3088K) committed = 3325952(3248K) max = 1073741824(1048576K)
-#Metaspace Non-heap memory: init = 0(0K) used = 25621304(25020K) committed = 26017792(25408K) max = -1(-1K)
-#Par Eden Space Heap memory: init = 671088640(655360K) used = 671088640(655360K) committed = 671088640(655360K) max = 671088640(655360K)
-#Par Survivor Space Heap memory: init = 83886080(81920K) used = 22923352(22386K) committed = 83886080(81920K) max = 83886080(81920K)
+        rule(
+            capture(r'JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.'),
+            update(event_type='startup_jmx_remote_disabled')),
 
-#Hostname: jblangston-rmbp.local
-#JMX is not enabled to receive remote connections. Please see cassandra-env.sh for more info.
-#completed pre-loading (8 keys) key cache.
-#No gossip backlog; proceeding
-#Waiting for gossip to settle before accepting client requests...
-#Cassandra shutting down...
+        rule(
+            capture(r'No gossip backlog; proceeding'),
+            update(event_type='startup_gossip_backlog_done')),
 
-#DseConfig
-#Load of settings is done.	
-#(?P<feature>.*) (?P<enabled>(is|are|is not|are not)) enabled
-#CQL slow log is enabled	 	28
-#Resource level latency tracking is not enabled	 	28
-#Spark cluster info tables are not enabled	 	28
-#User level latency tracking is not enabled	 	28
-#Cluster summary stats are not enabled	 	28
-#Database summary stats are not enabled	 	28
-#CQL system info tables are not enabled	 	28
-#Histogram data tables are not enabled	 	28
+        rule(
+            capture(r'Waiting for gossip to settle before accepting client requests...'),
+            update(event_type='startup_gossip_wait')),
 
-#DseSearchConfig
-#(?P<feature>.*) (?P<enabled>(is|are|is not|are not)) enabled
-#Solr latency snapshots are not enabled	 	14
-#Solr update handler metrics are not enabled	 	14
-#Solr request handler metrics are not enabled	 	14
-#Solr node health tracking is not enabled	 	14
-#Solr index statistics reporting is not enabled	 	14
-#Solr slow sub-query log is not enabled	 	14
-#Solr cache statistics reporting is not enabled	 	14
-#Solr indexing error log is not enabled	
+        rule(
+            capture(r'completed pre-loading \((?P<keys_loaded>[0-9]*) keys\) key cache.'),
+            update(event_type='startup_preload_keycache')),
+
+        rule(
+            capture(r'Waiting for gossip to settle before accepting client requests...'),
+            update(event_type='startup_gossip_settling')),
+
+        rule(
+            capture(r'Cassandra shutting down...'),
+            update(event_type='shutdown')),
+
+        rule(
+            capture(r'Hostname: (?P<hostname>.*)'),
+            update(event_type='startup_hostname')),
+
+        rule(
+            capture(r'(?P<memory_type>.*) memory: init = (?P<memory_init>[0-9]*)\([0-9]*K\) used = (?P<memory_used>[0-9]*)\([0-9]*K\) committed = (?P<memory_committed>[0-9]*)\([0-9]*K\) max = (?P<memory_max>[0-9-]*)\([0-9-]*K\)'),
+            convert(int, 'memory_init', 'memory_used', 'memory_committed', 'memory_max'),
+            update(event_type='startup_memory_size')),
+
+        rule(
+            capture(r'Exception in thread Thread\[(?P<exception_thread>[^\]]*)\]'),
+            update(event_type='exception')),
+
+    case('DseConfig', 'DseSearchConfig'),
+
+        rule(
+            capture(r'Load of settings is done.'),
+            update(event_type='startup_dse_settings_done')),
+
+        rule(
+            capture(r'(?P<feature>.*) (is|are) enabled.'),
+            update(event_type='startup_dse_feature_enabled')),
+
+        rule(
+            capture(r'(?P<feature>.*) (is|are) not enabled.'),
+            update(event_type='startup_dse_feature_disabled')),
 
     case('DseDaemon'), 
 
         rule(
             capture(r'(?P<component>[A-Za-z ]*) versions?: (?P<version>.*)'),
-            update(event_type='startup_component_version')),
+            update(event_type='startup_dse_component_version')),
 
     case('GCInspector'), 
 
@@ -113,6 +126,12 @@ capture_message = switch(
             convert(int, 'file_size', 'segment_id', 'position'),
             update(event_type='flush_end')),
 
+    case('SSTableDeletingTask'),
+
+        rule(
+            capture(r"Unable to delete (?P<sstable_file>[^ ]*) \(it will be removed on server restart; we'll also retry after GC\)"),
+            update(event_type='sstable_deletion_failed')),
+
     case('CompactionTask'), 
 
         rule(
@@ -122,20 +141,15 @@ capture_message = switch(
 
         rule(
             capture(
-                r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^,]*),\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows), (?P<unique_partitions>[0-9,]*) unique.  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}',
-                r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^,]*),\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows) merged to (?P<unique_partitions>[0-9,]*).  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}'),
+                r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^\]]*)\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows), (?P<unique_partitions>[0-9,]*) unique.  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}',
+                r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^\]]*)\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows) merged to (?P<unique_partitions>[0-9,]*).  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}'),
             convert(int_with_commas, 'sstable_count', 'input_bytes', 'output_bytes', 'percent_of_original', 'duration', 'total_partitions', 'unique_partitions'),
             update(event_type='compaction_end')),
-
-#Compacted 17 sstables to [].  4,352,295 bytes to 0 (~0% of original) in 176ms = 0.000000MB/s.  47 total partitions merged to 0.  Partition merge counts were {2:5, 3:8, 4:2, 5:1, }
-
-#SSTableDeletingTask
-#Unable to delete /mnt/cassandra/data/exchangecf/useractivityuserhourlysnapshot/exchangecf-useractivityuserhourlysnapshot-jb-6-Data.db (it will be removed on server restart; we'll also retry after GC)
 
     case('CompactionController'), 
 
         rule(
-            capture(r'Compacting large (partition|row) (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<partition_key>[0-9]*) \((?P<partition_size>[0-9]*) bytes\) incrementally'),
+            capture(r'Compacting large (partition|row) (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<partition_key>.*) \((?P<partition_size>[0-9]*) bytes\) incrementally'),
             convert(int, 'partition_size'),
             update(event_type='compaction_incremental')),
 
@@ -230,11 +244,8 @@ capture_message = switch(
             update(event_type='stream_task_succeeded')),
 
         rule(
-            capture(r'\[repair #(?P<session_id>[^\]]*)\] Forwarding streaming repair of (?P<ranges>[0-9]) ranges to (?P<forwarded_endpoint>[^ ]*) \(to be streamed with (?P<target_endpoint>[^)]*)\)'),
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] Forwarding streaming repair of (?P<ranges>[0-9]*) ranges to (?P<forwarded_endpoint>[^ ]*) \(to be streamed with (?P<target_endpoint>[^)]*)\)'),
             update(event_type='stream_forwarding')),
-
-#[repair #1afc26e0-1450-11e5-a3ed-3f8e9486b005] Forwarding streaming repair of 942 ranges to /10.1.0.21 (to be streamed with /10.1.0.15)
-#Forwarding streaming repair of 11 ranges to /10.1.40.18 (to be streamed with /10.1.0.21)
 
     case('StreamSession'),
 
@@ -252,14 +263,29 @@ capture_message = switch(
             capture(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<node>.*)'),
             update(event_type='stream_sstable_sent')),
 
-#OutboundTcpConnection
-#Handshaking version with /10.1.0.14
-#Cannot handshake version with /10.1.40.19
+    case('OutboundTcpConnection'),
 
-#Gossiper
-#InetAddress /10.1.40.13 is now UP
-#InetAddress /10.1.40.19 is now DOWN
-#Node /10.1.40.21 has restarted, now UP
+        rule(
+            capture(r'Handshaking version with (?P<endpoint>.*)'),
+            update(event_type='version_handshake')),
+
+        rule(
+            capture(r'Cannot handshake version with (?P<endpoint>.*)'),
+            update(event_type='version_handshake_failure')),
+
+    case('Gossiper'),
+
+        rule(
+            capture(r'InetAddress (?P<endpoint>[^ ]*) is now UP'),
+            update(event_type='node_up')),
+
+        rule(
+            capture(r'InetAddress (?P<endpoint>[^ ]*) is now DOWN'),
+            update(event_type='node_down')),
+
+        rule(
+            capture(r'Node (?P<endpoint>[^ ]*) has restarted, now UP'),
+            update(event_type='node_down')),
 
     case('SSTableReader'),
 
@@ -271,16 +297,16 @@ capture_message = switch(
     case('StatusLogger'),
 
         rule(
-            capture(r'Pool Name *Active *Pending *Completed *Blocked *All Time Blocked'),
+            capture(r'Pool Name +Active +Pending +Completed +Blocked +All Time Blocked'),
             update(event_type='pool_header')),
 
         rule(
-            capture(r'(?P<pool_name>[A-Za-z_]+) +(?P<active>[0-9]+) +(?P<pending>[0-9]+) +(?P<completed>[0-9]+) +(?P<blocked>[0-9]+) +(?P<all_time_blocked>[0-9]+)'),
-            convert(int, 'active', 'pending', 'completed', 'blocked', 'all_time_blocked'),
+            capture(r'(?P<pool_name>[A-Za-z_]+) +((?P<active>[0-9]+)|n/a) +(?P<pending>[0-9]+)(/(?P<pending_responses>[0-9]+))?( +(?P<completed>[0-9]+) +(?P<blocked>[0-9]+) +(?P<all_time_blocked>[0-9]+))?'),
+            convert(int, 'active', 'pending', 'pending_responses', 'completed', 'blocked', 'all_time_blocked'),
             update(event_type='pool_status')),
 
         rule(
-            capture(r'Cache Type *Size *Capacity *KeysToSave *Provider'),
+            capture(r'Cache Type +Size +Capacity +KeysToSave(Provider)?'),
             update(event_type='cache_header')),
 
         rule(
@@ -289,12 +315,12 @@ capture_message = switch(
             update(event_type='cache_status')),
 
         rule(
-            capture(r'ColumnFamily *Memtable ops,data'),
+            capture(r'ColumnFamily +Memtable ops,data'),
             update(event_type='memtable_header')),
 
 
         rule(
-            capture(r'(?P<keyspace>[^.]*)\.(?P<table>[^ ]*) *(?P<ops>[0-9]*),(?P<data>[0-9]*)'),
+            capture(r'(?P<keyspace>[^.]*)\.(?P<table>[^ ]*) +(?P<ops>[0-9]*),(?P<data>[0-9]*)'),
             convert(int, 'ops', 'data'),
             update(event_type='memtable_status')),
 
@@ -316,16 +342,34 @@ capture_message = switch(
             convert(split(', '), 'column_definition'),
             update(event_type='secondary_index_create')),
 
-#Submitting index build of [tenantactivity.errorcodeIndex] for data in SSTableReader(path='/mnt/cassandra/data/exchangecf/tenantactivity/exchangecf-tenantactivity-jb-3572-Data.db'), SSTableReader(path='/mnt/cassandra/data/exchangecf/tenantactivity/exchangecf-tenantactivity-jb-3574-Data.db'), SSTableReader(path='/mnt/cassandra/data/exchangecf/tenantactivity/exchangecf-tenantactivity-jb-3575-Data.db'), SSTableReader(path='/mnt/cassandra/data/exchangecf/tenantactivity/exchangecf-tenantactivity-jb-3576-Data.db'), SSTableReader(path='/mnt/cassandra/data/exchangecf/tenantactivity/exchangecf-tenantactivity-jb-3577-Data.db'), SSTableReader(path='/mnt/cassandra/data/exchangecf/tenantactivity/exchangecf-tenantactivity-jb-3578-Data.db'), SSTableReader(path='/mnt/cassandra/data/exchangecf/tenantactivity/exchangecf-tenantactivity-jb-3579-Data.db')
-#Index build of [tenantactivity.errorcodeIndex] complete
+        rule(
+            capture(r"Submitting index build of \[(?P<keyspace>[^.]*)\.(?P<table>[^\]]*)\] for data in (?P<sstables>.*)"),
+            convert(sstables, 'sstables'),
+            update(event_type='secondary_index_build_begin')),
 
-#ShardRouter
-#Updating shards state due to endpoint /127.0.0.1 changing state SCHEMA=54d5afa5-2326-38c5-bb1b-2ac1072857a6
+        rule(
+            capture(r'Index build of \[(?P<keyspace>[^.]*)\.(?P<table>[^\]]*)\] complete'),
+            update(event_type='secondary_index_build_end')),
 
-#QueryProcessor
-#Column definitions for zendesk.users changed, invalidating related prepared statements
-#Keyspace zendesk was dropped, invalidating related prepared statements	
-#Table zendesk.users was dropped, invalidating related prepared statements	
+    case('ShardRouter'),
+
+        rule(
+            capture(r'Updating shards state due to endpoint (?P<endpoint>[^ ]*) changing state (?P<state>.*)'),
+            update(event_type='solr_shard_state_change')),
+
+    case('QueryProcessor'),
+
+        rule(
+            capture(r'Column definitions for (?P<keyspace>[^.]*)\.(?P<table>[^ ]*) changed, invalidating related prepared statements'),
+            update(event_type='solr_column_definition_changed')),
+
+        rule(
+            capture(r'Keyspace (?P<keyspace>[^ ]*) was dropped, invalidating related prepared statements'),
+            update(event_type='solr_keyspace_dropped')),
+
+        rule(
+            capture(r'Table (?P<keyspace>[^.]*)\.(?P<table>[^ ]*) was dropped, invalidating related prepared statements'),
+            update(event_type='solr_table_dropped')),
 
     case('SolrCoreResourceManager'),
 
@@ -334,7 +378,7 @@ capture_message = switch(
             update(event_type='solr_write_resource')),
 
         rule(
-            capture(r'Trying to load resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) by querying from local node with (?P<consistency_level>.*)'),
+            capture(r'Trying to load resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) by querying from local node with CL (?P<consistency_level>.*)'),
             update(event_type='solr_load_resource_attempt')),
 
         rule(
@@ -348,12 +392,6 @@ capture_message = switch(
         rule(
             capture(r'Creating core: (?P<keyspace>[^.]*).(?P<table>.*)'),
             update(event_type='solr_create_core')),
-
-#Wrote resource 'schema.xml' for core 'zendesk.users'
-#Trying to load resource schema.xml for core zendesk.users by querying from local node with CL QUORUM
-#Successfully loaded resource schema.xml for core zendesk.users
-#No resource schema.xml.bak found for core zendesk.users on any live node.
-#Creating core: zendesk.tickets
 
     case('AbstractSolrSecondaryIndex'),
 
@@ -435,13 +473,7 @@ capture_message = switch(
             capture(r'user.dir=(?P<user_dir>.*)'),
             update(event_type='solr_user_dir')),
 
-#SolrDispatchFilter
-#[admin] webapp=null path=/admin/cores params={name=zendesk.organizations&action=CREATE} status=0 QTime=25658 
-#Error request params: name=zendesk.ticket_audits&action=CREATE
-#user.dir=/opt/dse-4.7.0
-#SolrDispatchFilter.init() done
-
-    case('ExternalLogger'),
+    case('ExternalLogger', 'SparkWorker-0 ExternalLogger'),
 
         rule(
             capture(r'(?P<source>[^:]*): (?P<message>.*)'),
@@ -452,18 +484,49 @@ capture_message = switch(
 #SparkMaster: Found host with 0.0.0.0 as rpc_address, using listen_address (/10.1.40.20) to contact it instead. If this is incorrect you should avoid the use of 0.0.0.0 server side.
 #SparkWorker: Killing process!
 #SparkWorker: Asked to kill executor app-20150627020010-0342/5
-#SparkWorker: Launch command: "/usr/lib/jvm/jdk1.7.0_75//bin/java" "-cp" "a.jar:b.jar" "-XX:MaxPermSize=128m" "-Djava.library.path=:/usr/share/dse/hadoop/native/Linux-amd64-64/lib" "-XX:MaxPermSize=256M" "-Djava.io.tmpdir=/mnt/spark/rdd" "-Dspark.cassandra.connection.factory=com.datastax.bdp.spark.DseCassandraConnectionFactory" "-Dspark.kryoserializer.buffer.mb=10" "-Dspark.driver.port=32991" "-Dcassandra.config.loader=com.datastax.bdp.config.DseConfigurationLoader" "-Dspark.cassandra.auth.conf.factory=com.datastax.bdp.spark.DseAuthConfFactory" "-Djava.system.class.loader=com.datastax.bdp.loader.DseClientClassLoader" "-Dlog4j.configuration=file:///etc/dse/spark/log4j-executor.properties" "-Dspark.cassandra.connection.host=10.1.40.10" "-Xms66560M" "-Xmx66560M" "org.apache.spark.executor.CoarseGrainedExecutorBackend" "akka.tcp://sparkDriver@10.1.40.10:32991/user/CoarseGrainedScheduler" "5" "10.1.40.10" "7" "akka.tcp://sparkWorker@10.1.40.10:53306/user/Worker" "app-20150627043009-0345"
+#SparkWorker: Launch command: "..." "..." "..."
 #SparkWorker: Runner thread for executor app-20150627043009-0345/5 interrupted
 #SparkWorker: Executor app-20150625220827-0264/5 finished with state KILLED exitStatus 1	
 
-#SparkWorkerRunner
-#Spark Master not ready yet at 10.1.40.10:7077...
-#Started Spark Worker, connected to master 10.1.40.10:7077
+    case('SparkWorkerRunner'),
 
-#JobTrackerManager
-#Failed to retrieve jobtracker locations at CL.QUORUM (Operation timed out - received only 12 responses.)
+        rule(
+            capture(r'Started Spark Worker, connected to master (?P<master_host>[^:]*):(?P<master_port>[0-9]+)'),
+            convert(int, 'master_port'),
+            update(event_type='spark_worker_started')),
+
+        rule(
+            capture(r'Spark Master not ready yet at (?P<master_host>[^:]*):(?P<master_port>[0-9]+)\.\.\.'),
+            convert(int, 'master_port'),
+            update(event_type='spark_master_not_ready')),
+
+    case('AbstractSparkRunner'),
+
+        rule(
+            capture(r'Starting Spark process: (?P<process>.*)'),
+            update(event_type='spark_process_starting')),
+
+        rule(
+            capture(r'Process (?P<process>[^ ]) has just received (?P<signal>.*)'),
+            update(event_type='spark_received_signal')),
+
+        rule(
+            capture(r'(?P<process>[^ ]*) threw exception in state (?P<state>[^:]*):'),
+            update(event_type='spark_process_exception')),
+
+    case('JobTrackerManager'),
+
+        rule(
+            capture(r'Failed to retrieve jobtracker locations at CL.(?P<consistency_level>[^ ]*) \((?P<error>[^)]*)\)'),
+            update(event_type='jobtracker_location_failure')),
 
     case('SliceQueryFilter'),
+
+        rule(
+            capture(r'Scanned over (?P<tombstoned_cells>[0-9]*) tombstones in (?P<keyspace>[^.]*).(?P<table>[^ ]*); query aborted \(see tombstone_failure_threshold\)'),
+            convert(int, 'live_cells', 'tombstoned_cells', 'requested_columns'),
+            convert(split(', '), 'deletion_info'),
+            update(event_type='tombstone_warning')),
 
         rule(
             capture(r'Read (?P<live_cells>[0-9]*) live and (?P<tombstoned_cells>[0-9]*) tombstoned cells in (?P<keyspace>[^.]*).(?P<table>[^ ]*) \(see tombstone_warn_threshold\). (?P<requested_columns>[0-9]*) columns was requested, slices=\[(?P<slice_start>[^-]*)-(?P<slice_end>[^\]]*)\], delInfo=\{(?P<deletion_info>[^}]*)\}'),
@@ -471,10 +534,12 @@ capture_message = switch(
             convert(split(', '), 'deletion_info'),
             update(event_type='tombstone_warning')),
 
-#Scanned over 100000 tombstones in exchangecf.useractivity; query aborted (see tombstone_failure_threshold)
+    case('BatchStatement'),
 
-#BatchStatement
-#Batch of prepared statements for [exchangecf.maventenanterrors] is of size 277799, exceeding specified threshold of 65536 by 212263.
+        rule(
+            capture(r'Batch of prepared statements for \[(?P<keyspace>[^.]*).(?P<table>[^\]]*)\] is of size (?P<batch_size>[0-9]*), exceeding specified threshold of (?P<batch_warn_threshold>[0-9]*) by (?P<threshold_exceeded_by>[0-9]*).'),
+            convert(int, 'batch_size', 'batch_warn_threshold', 'threshold_excess'),
+            update(event_type='batch_size_warning')),
     
     case('MeteredFlusher'),
 
@@ -505,30 +570,68 @@ capture_message = switch(
             convert(int, 'hints_delivered'),
             update(event_type='hinted_handoff_timeout')),
 
-#Timed out replaying hints to /10.1.40.11; aborting (31085 delivered)
+    case('PluginManager'),
 
-#PluginManager
-#Plugin activated: com.datastax.bdp.plugin.SparkPlugin
-#Registered plugin com.datastax.bdp.plugin.JobTrackerManagerPlugin
-#Deactivating plugin: com.datastax.bdp.leases.PeriodicTaskOwnershipPlugin
-#Activating plugin: com.datastax.bdp.plugin.SparkPlugin
-#All plugins are stopped.
+        rule(
+            capture(r'Plugin activated: (?P<plugin_class>.*)'),
+            update(event_type='plugin_activated')),
 
-#AutoSavingCache
-#Saved KeyCache (1267480 items) in 1869 ms
-#reading saved cache /mnt/cassandra/saved_caches/dse_system-job_trackers-KeyCache-b.db
+        rule(
+            capture(r'Registered plugin (?P<plugin_class>.*)'),
+            update(event_type='plugin_registered')),
 
-#MigrationTask
-#Can't send migration request: node /10.1.0.15 is down.
+        rule(
+            capture(r'Deactivating plugin: (?P<plugin_class>.*)'),
+            update(event_type='plugin_deactivating')),
 
-#MigrationManager
-#Drop Keyspace 'zendesk'	
-#Update ColumnFamily 'zendesk/tickets' From org.apache.cassandra.config.CFMetaData@19aacb04[ ... ] To org.apache.cassandra.config.CFMetaData@42550147[ ... ]
-#Create new ColumnFamily: org.apache.cassandra.config.CFMetaData@6bad1d87[ ... ]
-#Create new Keyspace: KSMetaData{ ... }
+        rule(
+            capture(r'Activating plugin: (?P<plugin_class>.*)'),
+            update(event_type='plugin_activating')),
 
-#DefsTables
-#Loading org.apache.cassandra.config.CFMetaData@655eef60[ ... ]
+        rule(
+            capture(r'All plugins are stopped.'),
+            update(event_type='plugin_all_stopped')),
+
+    case('AutoSavingCache'),
+
+        rule(
+            capture(r'Saved (?P<cache_type>[^ ]*) \((?P<cache_items>[0-9]*) items\) in (?P<save_duration>[0-9]*) ms'),
+            convert(int, 'cache_items', 'save_duration'),
+            update(event_type='cache_saved')),
+
+        rule(
+            capture(r'reading saved cache (?P<cache_file>.*)'),
+            update(event_type='cache_read')),
+
+    case('MigrationTask'),
+
+        rule(
+            capture(r"Can't send migration request: node (?P<endpoint>[^ ]*) is down."),
+            update(event_type='migration_request_failure')),
+
+    case('MigrationManager'),
+
+        rule(
+            capture(r"Drop Keyspace '(?P<keyspace>[^']*)'"),
+            update(event_type='migration_drop_keyspace')),
+
+        rule(
+            capture(r"Update ColumnFamily '(?P<keyspace>[^/]*)/(?P<table>[^']*)' From org.apache.cassandra.config.CFMetaData@(?P<old_hash>[^\]]*)\[(?P<old_metadata>.*)\] To org.apache.cassandra.config.CFMetaData@(?P<new_hash>[^\]]*)\[(?P<new_metadata>.*)\]"),
+            update(event_type='migration_update_table')),
+
+        rule(
+            capture(r"Create new ColumnFamily: org.apache.cassandra.config.CFMetaData@(?P<hash>[^\]]*)\[(?P<metadata>.*)\]"),
+            update(event_type='migration_create_table')),
+
+        rule(
+            capture(r"Create new Keyspace: KSMetaData\{(?P<metadata>.*)\}"),
+            update(event_type='migration_create_keyspace')),
+
+    case('DefsTables'),
+
+        rule(
+            capture(r'Loading org.apache.cassandra.config.CFMetaData@(?P<hash>[^\]]*)\[(?P<metadata>.*)\]'),
+            update(event_type='migration_load_table_metadata')),
 
     case('StorageService'),
 
@@ -537,25 +640,49 @@ capture_message = switch(
             update(event_type='node_state_normal')),
 
         rule(
+            capture(r'Repair session (?P<session_id>[^\]]*) for range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] finished'),
+            convert(int, 'range_begin', 'range_end'),
+            update(event_type='repair_session_finished')),
+
+        rule(
             capture(r'Repair session (?P<session_id>[^\]]*) for range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] failed with error (?P<error>)'),
             convert(int, 'range_begin', 'range_end'),
             update(event_type='repair_session_failure')),
 
         rule(
+            capture(r'Repair session failed:'),
+            update(event_type='repair_session_failure')),
+
+        rule(
+            capture(r'Starting up server gossip'),
+            update(event_type='startup_gossip_starting')),
+
+        rule(
+            capture(r'Loading persisted ring state'),
+            update(event_type='startup_loading_ring_state')),
+
+        rule(
+            capture(r'Thrift API version: (?P<version>.*)'),
+            update(event_type='startup_thrift_api_version')),
+
+        rule(
+            capture(r'CQL supported versions: (?P<supported_versions>[^ ]*) \(default: (?P<default_version>[^)]*)\)'),
+            convert(split(','), 'supported_versions'),
+            update(event_type='startup_cql_version')),
+
+        rule(
+            capture(r'Cassandra version: (?P<version>.*)'),
+            update(event_type='startup_cassandra_version')),
+
+        rule(
+            capture(r'Using saved tokens \[(?P<tokens>[^\]]*)\]'),
+            convert(split(','), 'tokens'),
+            update(event_type='startup_using_saved_tokens')),
+
+        rule(
             capture(r'setstreamthroughput: throttle set to (?P<stream_throughput>[0-9]*)'),
             convert(int, 'stream_throughput'),
             update(event_type='node_set_stream_throughput')),
-
-#Repair session failed:
-#Repair session 5f673720-0a41-11e5-aa12-ffcc6d9f0e80 for range (2215001505538808661,2237421997010099173] finished
-#Starting up server gossip	 	14
-#Loading persisted ring state	 	14
-#Thrift API version: 19.39.0	 	14
-#Using saved tokens [80372383360720788]	 	14
-#Node /127.0.0.1 state jump to normal	 	14
-#CQL supported versions: 2.0.0,3.2.0 (default: 3.2.0)	 	14
-#Cassandra version: 2.1.5.469	
-
 
     case('MessagingService'),
 
