@@ -74,17 +74,33 @@ capture_message = switch((
 
         rule(
             capture(r'(?P<feature>.*) (is|are) enabled'),
-            update(event_category='startup', event_type='dse_feature_enabled')),
+            update(event_category='startup', event_type='dse_feature', enabled=True)),
 
         rule(
             capture(r'(?P<feature>.*) (is|are) not enabled'),
-            update(event_category='startup', event_type='dse_feature_disabled')),
+            update(event_category='startup', event_type='dse_feature', enabled=False)),
 
     case('DseModule'),
 
-#Using Solr-enabled cql queries
-#CFS operations enabled
-#Loading DSE module
+        rule(
+            capture(r'Using regular cql queries'),
+            update(event_category='startup', event_type='solr_cql_queries', enabled=False)),
+
+        rule(
+            capture(r'Using Solr-enabled cql queries'),
+            update(event_category='startup', event_type='solr_cql_queries', enabled=True)),
+
+        rule(
+            capture(r'CFS operations enabled'),
+            update(event_category='startup', event_type='cfs_operations', enabled=True)),
+
+        rule(
+            capture(r'CFS operations disabled. Install the dse-analytics module if needed.'),
+            update(event_category='startup', event_type='cfs_operations', enabled=False)),
+
+        rule(
+            capture(r'Loading DSE module'),
+            update(event_category='startup', event_type='load_dse_module')),
 
     case('DseDaemon'), 
 
@@ -92,10 +108,21 @@ capture_message = switch((
             capture(r'(?P<component>[A-Za-z ]*) versions?: (?P<version>.*)'),
             update(event_category='startup', event_type='dse_component_version')),
 
-#Waiting for other nodes to become alive...
-#Wait for nodes completed
-#DSE shutting down...
-#The following nodes seems to be down: [/10.1.40.11, /10.1.40.10, /10.1.40.13, /10.1.40.12, /10.1.40.15, /10.1.40.14, /10.1.0.19, /10.1.40.19, /10.1.40.18]. Some Cassandra operations may fail with UnavailableException.
+        rule(
+            capture(r'Waiting for other nodes to become alive...'),
+            update(event_category='startup', event_type='wait_other_nodes')),
+
+        rule(
+            capture(r'Wait for nodes completed'),
+            update(event_category='startup', event_type='wait_other_nodes_complete')),
+
+        rule(
+            capture(r'DSE shutting down...'),
+            update(event_category='shutdown', event_type='dse_shutdown')),
+
+        rule(
+            capture(r'The following nodes seems to be down: \[(?P<endpoints>[^\]]*)\]. Some Cassandra operations may fail with UnavailableException.'),
+            update(event_category='gossip', event_type='down_nodes_warning')),
 
     case('GCInspector'), 
 
@@ -121,22 +148,26 @@ capture_message = switch((
                 r'Enqueuing flush of Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)',
                 r'Enqueuing flush of (?P<table>[^:]*): (?P<on_heap_bytes>[0-9]*) \((?P<on_heap_limit>[0-9]*)%\) on-heap, (?P<off_heap_bytes>[0-9]*) \((?P<off_heap_limit>[0-9]*)%\) off-heap'),
             convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_bytes', 'off_heap_bytes', 'on_heap_limit', 'off_heap_limit'),
-            update(event_category='flush', event_type='enqueue_flush')), 
+            update(event_category='memtable', event_type='enqueue_flush')), 
 
         rule(
             capture(r'Initializing (?P<keyspace>[^.]*).(?P<table>.*)'),
             update(event_category='startup', event_type='table_init')),
 
         rule(
-            capture(r'Flushing SecondaryIndex Cql3SolrSecondaryIndex\{columnDefs=\[(?P<column_defs>).*\]\}'),
-            convert(split(', '), 'column_defs'),
-            update(event_category='flush', event_type='secondary_index')),
+            capture(r'Unable to cancel in-progress compactions for (?P<table>[^.]*)\.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded\.'),
+            update(event_category='compaction', event_type='cancellation_failed')),
 
-#Unable to cancel in-progress compactions for tenantactivity.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.
-#Flushing largest CFS(Keyspace='exchangecf', ColumnFamily='users') to free up room. Used total: 0/0, live: 0/0, flushing: 0/0, this: 0/0
-#Unable to cancel in-progress compactions for userdatasetuserhourlysnapshot.  Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.
-#Flushing SecondaryIndex ThriftSolrSecondaryIndex{columnDefs=[ColumnDefinition{name=dashboard, type=org.apache.cassandra.db.marshal.UTF8Type, kind=REGULAR, componentIndex=null, indexName=banana_int_dashboard_index, indexType=CUSTOM}, ColumnDefinition{name=_docBoost, type=org.apache.cassandra.db.marshal.UTF8Type, kind=REGULAR, componentIndex=null, indexName=banana_int__docBoost_index, indexType=CUSTOM}]}
-#Flushing SecondaryIndex com.datastax.bdp.cassandra.index.solr.SolrSecondaryIndex@12e1ee0e
+        rule(
+            capture(r"Flushing largest CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) to free up room. Used total: (?P<used_on_heap>[0-9]*)/(?P<used_off_heap>[0-9]*), live: (?P<live_on_heap>[0-9]*)/(?P<live_off_heap>[0-9]*), flushing: (?P<flushing_on_heap>[0-9]*)/(?P<flushing_off_heap>[0-9]*), this: (?P<this_on_heap>[0-9]*)/(?P<this_off_heap>[0-9]*)"),
+            convert(int, 'used_on_heap', 'used_off_heap', 'live_on_heap', 'live_off_heap', 'flushing_on_heap', 'flushing_off_heap', 'this_on_heap', 'this_off_heap'),
+            update(event_category='memtable', event_type='flush_largest')),
+        
+        rule(
+            capture(
+                r"Flushing SecondaryIndex (?P<index_type>[^{]*)\{(?P<index_metadata>[^}]*)\}",
+                r"Flushing SecondaryIndex (?P<index_class>[^@]*)@(?P<index_hash>.*)"),
+            update(event_category='secondary_index', event_type='flush')),
 
     case('Memtable', 'ColumnFamilyStore'),
 
@@ -146,7 +177,7 @@ capture_message = switch((
                 r'Writing Memtable-(?P<table>[^@]*)@(?P<hash_code>[0-9]*)\((?P<serialized_bytes>[0-9]*)/(?P<live_bytes>[0-9]*) serialized/live bytes, (?P<ops>[0-9]*) ops\)'),
             convert(int, 'hash_code', 'serialized_bytes', 'live_bytes', 'ops', 'on_heap_limit', 'off_heap_limit'),
             convert(float, 'serialized_kb'),
-            update(event_category='flush', event_type='begin_flush')),
+            update(event_category='memtable', event_type='begin_flush')),
 
         rule(
             capture(
@@ -154,10 +185,18 @@ capture_message = switch((
                 r'Completed flushing; nothing needed to be retained.  Commitlog position was ReplayPosition\(segmentId=(?P<segment_id>[0-9]*), position=(?P<position>[0-9]*)\)'),
             convert(int, 'file_size_bytes', 'segment_id', 'position'),
             convert(float, 'file_size_kb'),
-            update(event_category='flush', event_type='end_flush')),
+            update(event_category='memtable', event_type='end_flush')),
 
-#CFS(Keyspace='system', ColumnFamily='peers') liveRatio is 12.14786535650746 (just-counted was 11.247694113701158).  calculation took 69ms for 180 columns
-#setting live ratio to maximum of 64.0 instead of 122.84600389863547
+        rule(
+            capture(r"CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) liveRatio is (?P<live_ratio>[0-9.]*) \(just-counted was (?P<just_counted>[0-9.]*)\).  calculation took (?P<duration>[0-9]*)ms for (?P<columns>[0-9]*) columns"),
+            convert(float, 'live_ratio', 'just_counted'),
+            convert(int, 'duration', 'columns'),
+            update(event_category='memtable', event_type='live_ratio_estimate')),
+
+        rule(
+            capture('setting live ratio to maximum of (?P<max_sane_ratio>[0-9.]*) instead of (?P<live_ratio_estimate>[0-9.]*)'),
+            convert(float, 'max_sane_ratio', 'estimated_ratio'),
+            update(event_category='memtable', event_type='live_ratio_max')),
 
     case('SSTableDeletingTask'),
 
@@ -167,9 +206,18 @@ capture_message = switch((
 
     case('CompactionManager'),
 
-#Will not compact /opt/mp/storage/persistent/cassandra-dse/cassandra-lib/data/system/hints/system-hints-ic-11: it is not an active sstable
-#Compaction interrupted: Compaction@3696255e-d8b5-3b5c-89b2-ccd9f2811e94(exchangecf, userdatasetraw, 248714703273/395476084710)bytes
-#No files to compact for user defined compaction
+        rule(
+            capture(r"Will not compact (?P<sstable_name>[^:]*): it is not an active sstable"),
+            update(event_category='compaction', event_type='inactive_sstable')),
+
+        rule(
+            capture(r"Compaction interrupted: (?P<compaction_type>[^@]*)@(?P<compaction_id>[^(]*)\((?P<table>[^,]*), (?P<keyspace>[^,]*), (?P<bytes_complete>[0-9]*)/(?P<bytes_total>[0-9]*)\)bytes"),
+            convert(int, 'bytes_complete', 'bytes_total'),
+            update(event_category='compaction', event_type='compaction_interrupted')),
+
+        rule(
+            capture(r"No files to compact for user defined compaction"),
+            update(event_category='compaction', event_type='no_files_to_compact')),
 
     case('CompactionTask'), 
 
@@ -191,8 +239,6 @@ capture_message = switch((
             capture(r'Compacting large (partition|row) (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<partition_key>.*) \((?P<partition_size>[0-9]*) bytes\) incrementally'),
             convert(int, 'partition_size'),
             update(event_category='compaction', event_type='incremental')),
-
-#Compacting large row exchangecf/maventenanterrors:710a03f5-10f6-4d38-9ff4-a80b81da590d (93368360 bytes) incrementally
 
     case('Differencer', 'AntiEntropyService'),
 
@@ -251,9 +297,19 @@ capture_message = switch((
 
     case('StreamOut'),
 
-#Beginning transfer to /10.66.131.46
-#Stream context metadata [/data/cassandra/OpsCenter/rollups60/OpsCenter-rollups60-ic-642-Data.db sections=3 progress=0/752241 - 0%, /data/cassandra/OpsCenter/rollups60/OpsCenter-rollups60-ic-792-Data.db sections=1 progress=0/11471 - 0%], 23 sstables.
-#Flushing memtables for [CFS(Keyspace='OpsCenter', ColumnFamily='rollups86400')]...
+        rule(
+            capture(r'Stream context metadata \[(?P<metadata>[^\]]*)\], (?P<sstable_count>[0-9]*) sstables.'),
+            convert(split(', '), 'metadata'),
+            convert(int, 'sstable_count'),
+            update(event_category='stream', event_type='context_metadata')),
+
+        rule(
+            capture(r'Beginning transfer to (?P<endpoint>.*)'),
+            update(event_category='stream', event_type='transfer_begin')),
+
+        rule(
+            capture(r"Flushing memtables for \[CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\)\].*"),
+            update(event_category='stream', event_type='flush_memtables')),
 
     case('StreamOutSession'),
 
@@ -308,19 +364,30 @@ capture_message = switch((
 
         rule(
             capture(r'\[streaming task #(?P<session_id>[^\]]*)\] Performing streaming repair of (?P<ranges>[0-9]*) ranges with (?P<endpoint>[^ ]*)'),
+            convert(int, 'ranges'),
             update(event_category='stream', event_type='begin_task')),
 
         rule(
-            capture(r'\[repair #(?P<session_id>[^\]]*)\] streaming task succeed, returning response to (?P<endpoint>[^ ]*)'),
+            capture(r'\[repair #(?P<session_id>[^\]]*)\] streaming task succeed(ed)?, returning response to (?P<endpoint>[^ ]*)'),
             update(event_category='stream', event_type='task_succeeded')),
 
         rule(
             capture(r'\[(repair|streaming task) #(?P<session_id>[^\]]*)\] Forwarding streaming repair of (?P<ranges>[0-9]*) ranges to (?P<forwarded_endpoint>[^ ]*) \(to be streamed with (?P<target_endpoint>[^)]*)\)'),
+            convert(int, 'ranges'),
             update(event_category='stream', event_type='forwarding')),
 
-#[streaming task #eeeec140-0e5d-11e5-9302-cb59eafd6434] Received task from /192.168.1.127 to stream 8 ranges to /192.168.1.128
-#[streaming task #3311de40-0f1f-11e5-b498-93de272ebdb9] task succeeded
-#[streaming task #d9a27c00-0e5d-11e5-9302-cb59eafd6434] task succ?eed(ed)?, forwarding response to /192.168.1.127
+        rule(
+            capture(r'\[streaming task #(?P<session_id>[^\]]*)\] Received task from (?P<source_endpoint>[^ ]*) to stream (?P<ranges>[0-9]*) ranges to (?P<target_endpoint>.*)'),
+            convert(int, 'ranges'),
+            update(event_category='stream', event_type='received_task')),
+
+        rule(
+            capture(r'\[streaming task #(?P<session_id>[^\]]*)\] task succeeded'),
+            update(event_category='stream', event_type='task_succeded')),
+
+        rule(
+            capture(r'\[streaming task #(?P<session_id>[^\]]*)\] task succ?eed(ed)?, forwarding response to (?P<endpoint>[^ ]*)'),
+            update(event_category='stream', event_type='forwarded_task_succeeded')),
 
     case('StreamSession'),
 
@@ -428,15 +495,29 @@ capture_message = switch((
             convert(int, 'ops', 'data'),
             update(event_category='status', event_type='memtable_status')),
 
-    case('CommitLogReplayer'),
+    case('CommitLogReplayer', 'CommitLog'),
                 
         rule(
-            capture(r'Replaying (?P<commitlog_file>[^ ]*)( \(CL version (?P<commitlog_version>[0-9]*), messaging version (?P<messaging_version>[0-9]*)\))?'),
+            capture(r'No commitlog files found; skipping replay'),
+            update(event_category='startup', event_type='commit_log_replay_skipped')),
+
+        rule(
+            capture(r'Replaying (?P<commitlog_file>.*)'),
+            convert(split(', '), 'commitlog_file'),
+            update(event_category='startup', event_type='begin_commitlog_replay')),
+
+        rule(
+            capture(r'Replaying (?P<commitlog_file>[^ ]*) \(CL version (?P<commitlog_version>[0-9]*), messaging version (?P<messaging_version>[0-9]*)\)'),
             convert(int, 'commitlog_version', 'messaging_version'),
             update(event_category='startup', event_type='begin_commitlog_replay')),
 
         rule(
             capture(r'Finished reading (?P<commitlog_file>.*)'),
+            update(event_category='startup', event_type='end_commitlog_replay')),
+
+        rule(
+            capture(r'Log replay complete, (?P<replayed_mutations>[0-9]*) replayed mutations'),
+            convert(int, 'replayed_mutations'),
             update(event_category='startup', event_type='end_commitlog_replay')),
 
     case('SecondaryIndex', 'SecondaryIndexManager'),
@@ -558,11 +639,11 @@ capture_message = switch((
             update(event_category='solr', event_type='load_resource_legacy')),
 
         rule(
-            capture(r'Trying to load resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) by querying from local node with CL (?P<consistency_level>.*)'),
+            capture(r'Trying to load resources? ((?P<resource>[^ ]*) )?for core (?P<keyspace>[^.]*).(?P<table>[^ ]*) by querying from local node with CL (?P<consistency_level>.*)'),
             update(event_category='solr', event_type='load_resource_query')),
 
         rule(
-            capture(r'Successfully loaded resource (?P<resource>[^ ]*) for core (?P<keyspace>[^.]*).(?P<table>[^ ]*)'),
+            capture(r'Successfully loaded (?P<count>[0-9]*)? ?resources?( (?P<resource>[^ ]*))? for core (?P<keyspace>[^.]*).(?P<table>[^ ]*)( by querying from local node with CL (?P<consistency_level>.*))?'),
             update(event_category='solr', event_type='load_resource_success')),
 
         rule(
@@ -570,21 +651,30 @@ capture_message = switch((
             update(event_category='solr', event_type='load_resource_failure')),
 
         rule(
+            capture(r"Unsupported schema version \((?P<schema_version>[^])*)\). Please use version '(?P<required_version>[^']*)' or greater."),
+            update(event_category='solr', event_type='unsupported_schema_version')),
+
+        rule(
             capture(r'Creating core: (?P<keyspace>[^.]*).(?P<table>.*)'),
             update(event_category='solr', event_type='create_core')),
+
+        rule(
+            capture(r'Reloading core: (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='reload_core')),
+
+        rule(
+            capture(r'Ignoring request trying to reload not existent core: (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='ignore_reload_nonexistent_core')),
+
+        rule(
+            capture(r'Ignoring request trying to create already existent core: (?P<keyspace>[^.]*).(?P<table>.*)'),
+            update(event_category='solr', event_type='ignore_create_existing_core')),
 
         rule(
             capture(r'Composite keys are not supported on Thrift-compatible tables: (?P<composite_key>.*)'),
             update(event_category='solr', event_type='thrift_composite_key_error')),
 
-#Reloading core: zendesk.organizations
-#Successfully loaded resources for core zendesk.organizations by querying from local node.
-#Trying to load resources for core zendesk.tickets by querying from local node with CL QUORUM
-#Successfully loaded 2 resources for core zendesk.organizations
-#Unsupported schema version (1.0). Please use version '1.1' or greater.
 #Plugin init failure for [schema.xml] fieldType "text_classes": Plugin init failure for [schema.xml] analyzer/tokenizer: Error instantiating class: 'org.apache.lucene.analysis.pattern.PatternTokenizerFactory'. Schema file is solr/conf/schema.xml
-#Ignoring request trying to reload not existent core: zendesk.organizations
-#Ignoring request trying to create already existent core: zendesk.ticket_comments
 
     case('AbstractSolrSecondaryIndex'),
 
@@ -798,7 +888,7 @@ capture_message = switch((
             convert(int, 'ref_count'),
             update(event_category='solr', event_type='close_directory_factory')),
 
-    case('YamlConfigurationLoader'),
+    case('YamlConfigurationLoader', 'DseConfigYamlLoader', 'DatabaseDescriptor'),
             
         rule(
             capture(r'Loading settings from file:(?P<yaml_file>.*)'),
@@ -811,17 +901,42 @@ capture_message = switch((
 
     case('DatabaseDescriptor'),
 
-#commit_failure_policy is stop
-#Data files directories: [/mnt/cassandra/data]
-#DiskAccessMode 'auto' determined to be mmap, indexAccessMode is mmap
-#Commit log directory: /mnt/cassandra/commitlog
-#Not using multi-threaded compaction
-#disk_failure_policy is stop
-#Global memtable threshold is enabled at 4800MB
-#Global memtable off-heap threshold is enabled at 4900MB
-#Global memtable on-heap threshold is enabled at 4800MB
-#Loading settings from file:/mnt/vm/cassandra-dse/resources/cassandra/conf/cassandra.yaml
-#Legacy authentication config found. Existing authentication data will be migrated to a system keyspace.
+        rule(
+            capture(r'commit_failure_policy is (?P<policy>.*)'),
+            update(event_category='startup', event_type='commit_failure_policy')),
+
+        rule(
+            capture(r'disk_failure_policy is (?P<policy>.*)'),
+            update(event_category='startup', event_type='disk_failure_policy')),
+
+        rule(
+            capture(r'Data files directories: \[(?P<data_file_directories>[^\]]*)\]'),
+            convert(split(', '), 'data_file_directories'),
+            update(event_category='startup', event_type='data_file_directories')),
+
+        rule(
+            capture(r'Commit log directory: (?P<commit_log_directory>.*)'),
+            update(event_category='startup', event_type='commit_log_directory')),
+
+        rule(
+            capture(r"DiskAccessMode 'auto' determined to be (?P<disk_access_mode>[^,]*), indexAccessMode is (?P<index_access_mode>.*)"),
+            update(event_category='startup', event_type='disk_access_mode', auto_determined=True)),
+
+        rule(
+            capture(r"DiskAccessMode is (?P<disk_access_mode>[^,]*), indexAccessMode is (?P<index_access_mode>.*)"),
+            update(event_category='startup', event_type='disk_access_mode', auto_determined=False)),
+
+        rule(
+            capture(r'Not using multi-threaded compaction'),
+            update(event_category='startup', event_type='multi_threaded_compaction', enabled=False)),
+
+        rule(
+            capture(r'using multi-threaded compaction'),
+            update(event_category='startup', event_type='multi_threaded_compaction', enabled=True)),
+
+        rule(
+            capture(r'Global memtable (?P<memtable_location>off-heap|on-heap) ?threshold is enabled at (?P<memtable_threshold>[0-9]*)MB'),
+            update(event_category='startup', event_type='global_memtable_threshold')),
 
     case('Worker'),
 
@@ -832,13 +947,19 @@ capture_message = switch((
     case('LeaderManagerWatcher'),
 
         rule(
-            capture(r'OH GOD'),
+            capture(
+                r'OH GOD',
+                r"Couldn't run initialization block"),
             update(event_category='jobtracker', event_type='leader_manager_exception')),
 
-#10.1.40.12/10.1.40.12: Leader HadoopJT.Analytics changed from /10.1.40.11 to /10.1.40.11 [external] [notified 1 listeners]
-#10.1.40.13/10.1.40.13: Leader Analytics.HadoopJT changed from <null> to /10.1.40.10 [external] [notified 1 listeners]
-#10.1.40.13/10.1.40.13: new listener for Analytics.HadoopJT initialized to /10.1.40.10
-#Couldn't run initialization block
+        rule(
+            capture(r'(?P<leader_manager>[^:]*): Leader (?P<dc_army>[^ ]*) changed from (?P<old_leader>[^ ]*) to (?P<new_leader>[^ ]*) \[(?P<reason>[^\]]*)\] \[notified (?P<listeners_notified>[0-9]*) listeners\]'),
+            convert(int, 'listeners_notified'),
+            update(event_category='jobtracker', event_type='leader_changed')),
+
+        rule(
+            capture(r'(?P<leader_manager>[^:]*): new listener for (?P<dc_army>[^ ]*) initialized to (?P<listener>.*)'),
+            update(event_category='jobtracker', event_type='new_listener')),
 
     case('ExternalLogger', 'SparkWorker-0 ExternalLogger'),
 
@@ -935,6 +1056,11 @@ capture_message = switch((
             update(event_category='thrift', event_type='invalid_frame_size')),
 
        rule(
+            capture(r'Invalid frame size got \((?P<frame_size>[0-9-]*)\), maximum expected (?P<max_frame_size>[0-9-]*)'),
+            convert(int, 'frame_size', 'max_frame_size'),
+            update(event_category='thrift', event_type='invalid_frame_size')),
+
+       rule(
             capture(r'Got an IOException in internalRead!'),
             update(event_category='thrift', event_type='receive_exception')),
 
@@ -942,30 +1068,56 @@ capture_message = switch((
             capture(r'Got an IOException during write!'),
             update(event_category='thrift', event_type='send_exception')),
 
-#Invalid frame size got (50331648), maximum expected 15728640
-#Unexpected exception during request; channel = [id: 0xbf0f3165, /127.0.0.1:49506 => /127.0.0.1:9042]
+       rule(
+            capture(r'Unexpected exception during request; channel = \[id: (?P<channel_id>[^,]*), (?P<client_host>[^:]*):(?P<client_port>[0-9]*) (=>|:>) (?P<server_host>[^:]*):(?P<server_port>[0-9]*)\]'),
+            convert(int, 'client_port', 'server_port'),
+            update(event_category='native_protocol', event_type='request_exception')),
 
     case('ThriftServer'),
 
-#Stop listening to thrift clients
-#Listening for thrift clients...
-#Binding thrift service to /10.65.131.221:9160
+       rule(
+            capture(r'Listening for thrift clients...'),
+            update(event_category='thrift', event_type='start_listen')),
+
+       rule(
+            capture(r'Stop listening to thrift clients'),
+            update(event_category='thrift', event_type='stop_listen')),
+
+       rule(
+            capture(r'Binding thrift service to (?P<thrift_host>[^:]*):(?P<thrift_port>[0-9]*)'),
+            convert(int, 'thrift_port'),
+            update(event_category='thrift', event_type='bind_address')),
 
     case('Server'),
+    
+       rule(
+            capture(r'Starting listening for CQL clients on (?P<native_host>[^:]*):(?P<native_port>[0-9]*)'),
+            convert(int, 'thrift_port'),
+            update(event_category='native_transport', event_type='start_listen')),
 
-#Stop listening for CQL clients
-#Using Netty Version: [netty-buffer=netty-buffer-4.0.23.Final.208198c, netty-codec=netty-codec-4.0.23.Final.208198c, netty-codec-http=netty-codec-http-4.0.23.Final.208198c, netty-codec-socks=netty-codec-socks-4.0.23.Final.208198c, netty-common=netty-common-4.0.23.Final.208198c, netty-handler=netty-handler-4.0.23.Final.208198c, netty-transport=netty-transport-4.0.23.Final.208198c, netty-transport-rxtx=netty-transport-rxtx-4.0.23.Final.208198c, netty-transport-sctp=netty-transport-sctp-4.0.23.Final.208198c, netty-transport-udt=netty-transport-udt-4.0.23.Final.208198c]
-#Starting listening for CQL clients on /0.0.0.0:9042...
-#Netty using native Epoll event loop
-#Netty using Java NIO event loop
-#jetty-8.y.z-SNAPSHOT
+       rule(
+            capture(r'Stop listening for CQL clients'),
+            update(event_category='native_transport', event_type='stop_listen')),
+
+       rule(
+            capture(r'Netty using (?P<event_loop_type>native Epoll|Java NIO) event loop'),
+            update(event_category='native_transport', event_type='netty_event_loop')),
+
+       rule(
+            capture(r'Using Netty Version: \[(?P<netty_version>[^\]]*)\]'),
+            convert(split(', '), 'netty_version'),
+            update(event_category='native_transport', event_type='netty_verision')),
+
+       rule(
+            capture(r'jetty-(?P<jetty_version>.*)'),
+            update(event_category='native_transport', event_type='jetty_verision')),
 
     case('MeteredFlusher'),
 
         rule(
             capture(r"[Ff]lushing high-traffic column family CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) \(estimated (?P<estimated_bytes>[0-9]*) bytes\)"),
             convert(int, 'estimated_bytes'),
-            update(event_category='flush', event_type='metered')),
+            update(event_category='memtable', event_type='metered_flush')),
         
     case('Validator', 'AntiEntropyService'),
 
@@ -989,14 +1141,22 @@ capture_message = switch((
             convert(int, 'hints_delivered'),
             update(event_category='hinted_handoff', event_type='hint_timeout')),
 
-#Could not truncate all hints.
-#Truncating all stored hints.
-#Deleting any stored hints for /10.1.0.14
+        rule(
+            capture(r'Could not truncate all hints.'),
+            update(event_category='hinted_handoff', event_type='truncate_hints_failure')),
+
+        rule(
+            capture(r'Truncating all stored hints.'),
+            update(event_category='hinted_handoff', event_type='truncate_hints')),
+
+        rule(
+            capture(r'Deleting any stored hints for (?P<endpoint>.*)'),
+            update(event_category='hinted_handoff', event_type='delete_hints_for_endpoint')),
 
     case('HintedHandoffMetrics'),
 
         rule(
-            capture(r'(?P<endpoint>) has (?P<hints_dropped>[0-9]*) dropped hints, because node is down past configured hint window.'),
+            capture(r'(?P<endpoint>[^ ]*) has (?P<hints_dropped>[0-9]*) dropped hints, because node is down past configured hint window.'),
             convert(int, 'hints_dropped'),
             update(event_category='hinted_handoff', event_type='hints_dropped')),
 
@@ -1054,21 +1214,22 @@ capture_message = switch((
         rule(
             capture(r'Saved (?P<cache_type>[^ ]*) \((?P<cache_items>[0-9]*) items\) in (?P<save_duration>[0-9]*) ms'),
             convert(int, 'cache_items', 'save_duration'),
-            update(event_category='cache', event_type='cache_saved')),
+            update(event_category='cache', event_type='save')),
 
         rule(
             capture(r'reading saved cache (?P<cache_file>.*)'),
-            update(event_category='cache', event_type='cache_read')),
+            update(event_category='cache', event_type='read')),
 
     case('CacheService'),
 
-#Scheduling counter cache save to every 7200 seconds (going to save all keys).
-#Scheduling row cache save to each 0 seconds (going to save all keys).
-#Scheduling key cache save to each 14400 seconds (going to save all keys).
-#Initializing key cache with capacity of 100 MBs.
-#Initializing counter cache with capacity of 50 MBs
-#Initializing row cache with capacity of 0 MBs
-#Initializing row cache with capacity of 0 MBs and provider org.apache.cassandra.cache.SerializingCacheProvider
+        rule(
+            capture(r'Scheduling (?P<cache_type>[^ ]*) cache save to every (?P<save_interval>[0-9]*) seconds \(going to save (?P<keys_to_save>[^ ]*) keys\).'),
+            convert(int, 'save_interval'),
+            update(event_category='cache', event_type='schedule_save')),
+
+        rule(
+            capture(r'Initializing (?P<cache_type>[^ ]*) cache with capacity of (?P<cache_capacity_mb>[0-9]*) MBs\.?( and provider (?P<cache_provider>.*))?'),
+            update(event_category='cache', event_type='init')),
 
     case('MigrationTask'),
 
@@ -1102,10 +1263,9 @@ capture_message = switch((
 
     case('StorageService'),
 
-
         rule(
-            capture(r'Node (?P<endpoint>[^ ]*) state jump to normal'),
-            update(event_category='gossip', event_type='node_state_normal')),
+            capture(r'adding secondary index (?P<keyspace>[^.]*)\.(?P<table>[^ ]*) to operation'),
+            update(event_category='secondary_index', event_type='added_to_operation')),
 
         rule(
             capture(r'Repair session (?P<session_id>[^\]]*) for range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] finished'),
@@ -1120,6 +1280,50 @@ capture_message = switch((
         rule(
             capture(r'Repair session failed:'),
             update(event_category='repair', event_type='session_failure')),
+
+        rule(
+            capture(r'Starting repair command #(?P<command>[0-9]*), repairing (?P<ranges>[0-9]*) ranges for keyspace (?P<keyspace>.*)( \(parallelism=(?P<parallelism>[^,]), full=(?P<full>[^)])\))?'),
+            convert(int, 'command', 'ranges'),
+            update(event_category='repair', event_type='command_begin')),
+
+        rule(
+            capture(r'starting user-requested repair of range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for keyspace (?P<keyspace>[^ ]*) and column families \[(?P<tables>[^\]]*)\]'),
+            convert(split(','), 'tables'),
+            update(event_category='repair', event_type='session_failure')),
+
+        rule(
+            capture(r"Flushing CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) to relieve memory pressure"),
+            update(event_category='memtable', event_type='memory_pressure_flush')),
+
+        rule(
+            capture(r'Endpoint (?P<target_endpoint>[^ ]*) is down and will not receive data for re-replication of (?P<source_endpoint>.*)'),
+            update(event_category='gossip', event_type='replication_endpoint_down')),
+
+        rule(
+            capture(r'Removing tokens \[(?P<tokens>[^\]]*)\] for (?P<endpoint>.*)'),
+            convert(split(', '), 'tokens'),
+            update(event_category='gossip', event_type='removal_not_confirmed')),
+
+        rule(
+            capture(r'Removal not confirmed for (for )?(?P<endpoints>.*)'),
+            convert(split(','), 'endpoints'),
+            update(event_category='gossip', event_type='removal_not_confirmed')),
+
+        rule(
+            capture(r'Node (?P<endpoint>[^ ]*) state jump to (?P<state>.*)'),
+            update(event_category='gossip', event_type='node_state_jump')),
+
+        rule(
+            capture(r'Stopping gossip by operator request'),
+            update(event_category='gossip', event_type='operator_stop')),
+
+        rule(
+            capture(r'Starting gossip by operator request'),
+            update(event_category='gossip', event_type='operator_start')),
+
+        rule(
+            capture(r'Startup completed! Now serving reads.'),
+            update(event_category='startup', event_type='serving_reads')),
 
         rule(
             capture(r'Starting up server gossip'),
@@ -1152,34 +1356,41 @@ capture_message = switch((
             convert(int, 'stream_throughput'),
             update(event_category='config', event_type='stream_throughput')),
 
-#Flushing CFS(Keyspace='MSA', ColumnFamily='subinfo') to relieve memory pressure
-#adding secondary index users.happinessscore to operation
-#Starting repair command #8, repairing 611 ranges for keyspace OpsCenter
-#Starting repair command #3, repairing 32 ranges for keyspace exchangesf (parallelism=SEQUENTIAL, full=true)
-#Node /10.1.0.21 state jump to bootstrap
-#Removal not confirmed for for 10.1.40.10/10.1.40.10,/10.1.40.11
-#Endpoint /10.1.0.13 is down and will not receive data for re-replication of /10.1.40.15
-#Removing tokens [-8467373500947642860, -6918355872246382064] for /10.1.40.15
-#starting user-requested repair of range \[\(6358927983839558859,6362741398290227435\]\] for keyspace dse_security and column families \[tokens\]
-#DRAINING: starting drain process
-#DRAINED
-#Cannot drain node \(did it already happen\?\)
-#Removal not confirmed for for 10.1.40.10/10.1.40.10,/10.1.40.11
-#Stopping gossip by operator request
-#Starting gossip by operator request
-#Startup completed! Now serving reads.
+        rule(
+            capture(r'DRAINING: starting drain process'),
+            update(event_category='shutdown', event_type='drain_begin')),
+
+        rule(
+            capture(r'DRAINED'),
+            update(event_category='shutdown', event_type='drain_end')),
+
+        rule(
+            capture(r'Cannot drain node \(did it already happen\?\)'),
+            update(event_category='shutdown', event_type='drain_failed')),
 
     case('MessagingService'),
 
         rule(
             capture(r'(?P<messages_dropped>[0-9]*) (?P<message_type>[^ ]*) messages dropped in last 5000ms'),
             convert(int, 'messages_dropped'),
-            update(event_category='status', event_type='messages_dropped'))))
+            update(event_category='status', event_type='messages_dropped')),
 
-#Starting Messaging Service on port 7000
-#MessagingService has terminated the accept() thread
-#Waiting for messaging service to quiesce
-#MessagingService shutting down server thread.
+        rule(
+            capture(r'Starting Messaging Service on port (?P<port>[0-9]*)'),
+            convert(int, 'port'),
+            update(event_category='startup', event_type='start_messaging_service')),
+
+        rule(
+            capture(r'Waiting for messaging service to quiesce'),
+            update(event_category='shutdown', event_type='messaging_service_wait_to_quiesce')),
+
+        rule(
+            capture(r'MessagingService has terminated the accept\(\) thread'),
+            update(event_category='shutdown', event_type='messaging_service_terminate_accept')),
+
+        rule(
+            capture(r'MessagingService shutting down server thread.'),
+            update(event_category='shutdown', event_type='messaging_service_shutdown_thread'))))
 
 def update_message(fields):
     subfields = capture_message(fields['source_file'][:-5], fields['message'])
