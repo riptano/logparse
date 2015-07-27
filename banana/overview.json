@@ -45,7 +45,6 @@
     },
     "filter": {
       "idQueue": [
-        1,
         2,
         3,
         4,
@@ -64,10 +63,21 @@
           "active": true,
           "alias": "",
           "id": 0
+        },
+        "1": {
+          "type": "time",
+          "from": "2015-05-20T11:39:57.789Z",
+          "to": "2015-07-27T21:34:48.567Z",
+          "field": "date",
+          "mandate": "must",
+          "active": true,
+          "alias": "",
+          "id": 1
         }
       },
       "ids": [
-        0
+        0,
+        1
       ]
     }
   },
@@ -87,7 +97,7 @@
           "loadingEditor": false,
           "status": "Stable",
           "mode": "markdown",
-          "content": "### Cassandra System.log Overview\n\nThis dashboard gives an overview of the events in your system.log, broken down in various ways and plotted over time.\n\n#### Search Parameters\n\nIn the first row, you can select the time window and the search terms. Terms have already been entered to color code the events based on severity level. The third panel shows how many results have been found.\n\n#### Filtering\n\nThe second row allows you to control the filters applied to the dashboard. The left panel shows the filters that have already been applied to the dashboard. To remove a previously applied filter, click the x on the box representing the filter. The right panel allows you to choose a specific log file or host. The number of events in each log and for each host are shown, allowing you to zero in on trouble spots.\n\n#### Event Counts\n\nThe third row is a time-series histogram that shows the number of events that occurred within a specific time window. You can use this to identify active periods in the log. This view also allows you to drag over a specific time period to zoom in on that period. All the other graphs will adjust to show only events within that time period.\n\n#### Breakdown Charts\n\nThe next two rows show bar charts breaking down the severity level, source file, thread, source file, event type, and event category of each event. You can click on any bar to filter for that value. \n\n#### Data Table\n\nFinally, the table at the bottom shows the level, date, thread, and message for each event. You can click on a row to view full details about the event. \n\nEach event has the following fields:\n\n- id: a time-based UUID uniquely identifying the event\n- log_file: the log file that the events are from\n- log_line: the line number that the event occurs on in the log\n- host: the host that the events are from\n- level: the severity of the event (From most to least severe: ERROR, WARN, INFO, DEBUG)\n- date: the date and time the event occurred\n- thread: the thread that generated the event\n- source_file: the source file that logged the event\n- source_line: the line of code where the event was logged\n- message: the detailed message logged by the event\n- exception: an optional exception that triggered the event\n\nDynamic fields specific to a particular type of event are prefixed with a letter indicating their type:\n\n- s_ for string\n- i_ for integer (64-bit)\n- f_ for floating point (64-bit)\n- d_ for date\n- b_ for boolean\n- l_ for a newline-delimited list of strings\n\nYou can also click on a heading to sort by a specific field. By default the table is sorted by date in descending order.",
+          "content": "### Cassandra System.log Overview\n\nThis dashboard gives an overview of the events in your system.log, broken down in various ways and plotted over time.\n\n#### Search Parameters\n\nIn the first row, you can select the time window and the search terms. Terms have already been entered to color code the events based on severity level. NB, the colors assigned here only apply to the event count histogram. Colors in the bar charts are assigned separately and similar colors may be used.  The third panel shows how many results have been found.\n\n#### Filtering\n\nThe second row allows you to control the filters applied to the dashboard. The left panel shows the filters that have already been applied to the dashboard. To remove a previously applied filter, click the x on the box representing the filter. The right panel allows you to choose a specific log file or host. The number of events in each log and for each host are shown, allowing you to zero in on trouble spots.\n\n#### Event Counts\n\nThe third row is a time-series histogram that shows the number of events that occurred within a specific time window. You can use this to identify active periods in the log. This view also allows you to drag over a specific time period to zoom in on that period. All the other graphs will adjust to show only events within that time period.\n\n#### Breakdown Charts\n\nThe next two rows show bar charts breaking down the severity level, source file, thread, source file, event type, and event category of each event. You can click on any bar to filter for that value. \n\n#### Data Table\n\nFinally, the table at the bottom shows the level, date, thread, and message for each event. You can click on a row to view full details about the event. \n\nEach event has the following fields:\n\n- id: a time-based UUID uniquely identifying the event\n- log_file: the log file that the events are from\n- log_line: the line number that the event occurs on in the log\n- host: the host that the events are from\n- level: the severity of the event (From most to least severe: ERROR, WARN, INFO, DEBUG)\n- date: the date and time the event occurred\n- thread: the thread that generated the event\n- source_file: the source file that logged the event\n- source_line: the line of code where the event was logged\n- message: the detailed message logged by the event\n- exception: an optional exception that triggered the event\n\nDynamic fields specific to a particular type of event are prefixed with a letter indicating their type:\n\n- s_ for string\n- i_ for integer (64-bit)\n- f_ for floating point (64-bit)\n- d_ for date\n- b_ for boolean\n- l_ for a newline-delimited list of strings\n\nYou can also click on a heading to sort by a specific field. By default the table is sorted by date in descending order.",
           "style": {},
           "title": "Help"
         }
@@ -133,7 +143,7 @@
           "spyable": true,
           "title": "Time Window",
           "time": {
-            "from": "07/27/2010 17:34:48",
+            "from": "05/20/2015 07:39:57",
             "to": "07/27/2015 17:34:48"
           }
         },
@@ -178,7 +188,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\nq=level%3AWARN&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\nq=level%3AINFO&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\nq=level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\n",
+            "query": "q=level%3AERROR&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&wt=json&rows=0\nq=level%3AWARN&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&wt=json&rows=0\nq=level%3AINFO&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&wt=json&rows=0\nq=level%3ADEBUG&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&wt=json&rows=0\n",
             "basic_query": "",
             "custom": ""
           },
@@ -228,8 +238,8 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=log_file&facet.field=host&wt=json",
-            "basic_query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=log_file&facet.field=host",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=log_file&facet.field=host&wt=json",
+            "basic_query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=log_file&facet.field=host",
             "custom": ""
           },
           "group": "default",
@@ -276,7 +286,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\nq=level%3AWARN&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\nq=level%3AINFO&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\nq=level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\n",
+            "query": "q=level%3AERROR&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.range=date&facet.range.start=2015-05-20T11:39:57.789Z&facet.range.end=2015-07-27T21:34:48.567Z&facet.range.gap=%2B12HOUR\nq=level%3AWARN&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.range=date&facet.range.start=2015-05-20T11:39:57.789Z&facet.range.end=2015-07-27T21:34:48.567Z&facet.range.gap=%2B12HOUR\nq=level%3AINFO&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.range=date&facet.range.start=2015-05-20T11:39:57.789Z&facet.range.end=2015-07-27T21:34:48.567Z&facet.range.gap=%2B12HOUR\nq=level%3ADEBUG&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.range=date&facet.range.start=2015-05-20T11:39:57.789Z&facet.range.end=2015-07-27T21:34:48.567Z&facet.range.gap=%2B12HOUR\n",
             "custom": ""
           },
           "max_rows": 100000,
@@ -284,7 +294,7 @@
           "group_field": null,
           "auto_int": true,
           "resolution": 100,
-          "interval": "7d",
+          "interval": "12h",
           "intervals": [
             "auto",
             "1s",
@@ -345,7 +355,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=level&facet.limit=10&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=level&facet.limit=10&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -443,7 +453,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=source_file&facet.limit=20&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=source_file&facet.limit=20&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -541,7 +551,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=thread_name&facet.limit=20&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=thread_name&facet.limit=20&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -648,7 +658,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=log_file&facet.limit=10&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=log_file&facet.limit=10&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -746,7 +756,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=event_type&facet.limit=20&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=event_type&facet.limit=20&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -844,7 +854,7 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=event_category&facet.limit=10&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&facet=true&facet.field=event_category&facet.limit=10&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -952,8 +962,8 @@
               2,
               3
             ],
-            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&sort=date desc&wt=json&rows=500",
-            "basic_query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&sort=date desc",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&sort=date desc&wt=json&rows=500",
+            "basic_query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[2015-05-20T11:39:57.789Z%20TO%202015-07-27T21:34:48.567Z]&sort=date desc",
             "custom": ""
           },
           "size": 100,
