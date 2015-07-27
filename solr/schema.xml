@@ -11,6 +11,11 @@
         <tokenizer class="solr.StandardTokenizerFactory"/>
       </analyzer>
     </fieldType>
+    <fieldType name="newline_delimited_list" class="solr.TextField" multiValued="false">
+      <analyzer>
+        <tokenizer class="solr.PatternTokenizerFactory" pattern="\n"/>
+      </analyzer>
+    </fieldType>
     <fieldType name="string" class="solr.StrField" multiValued="false"/>
     <fieldType name="int" class="solr.TrieIntField" multiValued="false"/>
     <fieldType name="date" class="solr.TrieDateField" multiValued="false"/>
@@ -42,6 +47,7 @@
     <dynamicField name="i_*" type="long" indexed="true" stored="true"/>
     <dynamicField name="f_*" type="double" indexed="true" stored="true"/>
     <dynamicField name="s_*" type="string" indexed="true" stored="true"/>
+    <dynamicField name="l_*" type="newline_delimited_list" indexed="true" stored="true"/>
   </fields>
 
   <uniqueKey>id</uniqueKey>
