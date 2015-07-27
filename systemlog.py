@@ -188,9 +188,9 @@ capture_message = switch((
             update(event_category='memtable', event_type='end_flush')),
 
         rule(
-            capture(r"CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) liveRatio is (?P<live_ratio>[0-9.]*) \(just-counted was (?P<just_counted>[0-9.]*)\).  calculation took (?P<duration>[0-9]*)ms for (?P<columns>[0-9]*) columns"),
+            capture(r"CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) liveRatio is (?P<live_ratio>[0-9.]*) \(just-counted was (?P<just_counted>[0-9.]*)\).  calculation took (?P<duration>[0-9]*)ms for (?P<cells>[0-9]*) (columns|cells)"),
             convert(float, 'live_ratio', 'just_counted'),
-            convert(int, 'duration', 'columns'),
+            convert(int, 'duration', 'cells'),
             update(event_category='memtable', event_type='live_ratio_estimate')),
 
         rule(
@@ -231,6 +231,8 @@ capture_message = switch((
                 r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^\]]*)\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows), (?P<unique_partitions>[0-9,]*) unique.  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}',
                 r'Compacted (?P<sstable_count>[0-9]*) sstables to \[(?P<output_sstable>[^\]]*)\].  (?P<input_bytes>[0-9,]*) bytes to (?P<output_bytes>[0-9,]*) \(~(?P<percent_of_original>[0-9]*)% of original\) in (?P<duration>[0-9,]*)ms = (?P<rate>[0-9.]*)MB/s.  (?P<total_partitions>[0-9,]*) total (partitions|rows) merged to (?P<unique_partitions>[0-9,]*).  (Row|Partition) merge counts were \{(?P<partition_merge_counts>[^}]*)\}'),
             convert(int_with_commas, 'sstable_count', 'input_bytes', 'output_bytes', 'percent_of_original', 'duration', 'total_partitions', 'unique_partitions'),
+            convert(float, 'rate'),
+            convert(split(', '), 'partition_merge_counts'),
             update(event_category='compaction', event_type='end_compaction')),
 
     case('CompactionController'), 
@@ -405,6 +407,12 @@ capture_message = switch((
             capture(r'Successfully sent (?P<sstable_name>[^ ]*) to (?P<endpoint>.*)'),
             update(event_category='stream', event_type='sstable_sent')),
 
+    case('IncomingTcpConnection'),
+
+        rule(
+            capture(r'UnknownColumnFamilyException reading from socket; closing'),
+            update(event_category='messaging', event_type='unknown_table')),
+            
     case('OutboundTcpConnection'),
 
         rule(
@@ -895,9 +903,9 @@ capture_message = switch((
             update(event_category='startup', event_type='config_file')),
 
         rule(
-            capture(r'Node configuration:\[(?P<node_configuration>.*)\]'),
-            convert(split('; '), 'node_configuration'),
-            update(event_category='startup', event_type='config_settings')),
+            capture(r'Node configuration:\[(?P<settings>.*)\]'),
+            convert(lambda x: dict([y.split('=', 1) for y in x.split('; ')]), 'settings'),
+            update(event_category='startup', event_type='yaml_settings')),
 
     case('DatabaseDescriptor'),
 
@@ -938,7 +946,7 @@ capture_message = switch((
             capture(r'Global memtable (?P<memtable_location>off-heap|on-heap) ?threshold is enabled at (?P<memtable_threshold>[0-9]*)MB'),
             update(event_category='startup', event_type='global_memtable_threshold')),
 
-    case('Worker'),
+    case('Worker', 'IndexWorker'),
 
         rule(
             capture(r'Shutting down work pool worker!'),
@@ -1287,7 +1295,7 @@ capture_message = switch((
             update(event_category='repair', event_type='command_begin')),
 
         rule(
-            capture(r'starting user-requested repair of range \((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\] for keyspace (?P<keyspace>[^ ]*) and column families \[(?P<tables>[^\]]*)\]'),
+            capture(r'starting user-requested repair of range \[?\((?P<range_begin>[^,]*),(?P<range_end>[^\]]*)\]\]? for keyspace (?P<keyspace>[^ ]*) and column families \[(?P<tables>[^\]]*)\]'),
             convert(split(','), 'tables'),
             update(event_category='repair', event_type='session_failure')),
 
@@ -1347,7 +1355,7 @@ capture_message = switch((
             update(event_category='startup', event_type='cassandra_version')),
 
         rule(
-            capture(r'Using saved tokens \[(?P<tokens>[^\]]*)\]'),
+            capture(r'Using saved tokens? \[(?P<tokens>[^\]]*)\]'),
             convert(split(','), 'tokens'),
             update(event_category='startup', event_type='using_saved_tokens')),
 
