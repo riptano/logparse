@@ -1,5 +1,6 @@
 import json
 import uuid
+import collections
 
 from copy import deepcopy
 from datetime import datetime
@@ -7,6 +8,17 @@ from cassandra.cluster import Cluster
 from cassandra.query import dict_factory
 from cassandra.util import uuid_from_time
 
+import collections
+
+def flatten(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = parent_key + sep + k if parent_key else k
+        if isinstance(v, collections.MutableMapping):
+            items.extend(flatten(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 class CassandraStore:
     def __init__(self, contact_points=None, keyspace='logparse', async=True):
@@ -37,13 +49,15 @@ class CassandraStore:
         def date_handler(obj):
             return obj.isoformat() if hasattr(obj, 'isoformat') else obj
 
+        parameters = flatten(parameters)
+
         if 'id' not in parameters:
             if 'date' in parameters:
                 parameters['id'] = uuid_from_time(parameters['date'])
             else:
                 parameters['id'] = uuid.uuid4()
 
-        generic = {'b_': {}, 'd_': {}, 'i_': {}, 'f_': {}, 's_': {}}
+        generic = {'b_': {}, 'd_': {}, 'i_': {}, 'f_': {}, 's_': {}, 'l_': {}}
         for key, value in parameters.items():
             if key not in self.columns[table]:
                 if type(value) is bool:
@@ -54,8 +68,11 @@ class CassandraStore:
                     prefix = 'i_'
                 elif type(value) is float:
                     prefix = 'f_'
-                elif type(value) is str or type(value) is unicode:
+                elif isinstance(value, (str, unicode)):
                     prefix = 's_'
+                elif type(value) is list:
+                    prefix = 'l_'
+                    value = '\n'.join([str(x) for x in value])
                 elif value is not None:
                     prefix = 's_'
                     value = json.dumps(value, default=date_handler)
