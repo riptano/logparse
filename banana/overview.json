@@ -3,23 +3,44 @@
   "services": {
     "query": {
       "idQueue": [
-        1,
-        2,
-        3,
         4
       ],
       "list": {
         "0": {
-          "query": "*:*",
+          "query": "level:ERROR",
           "alias": "",
-          "color": "#7EB26D",
+          "color": "#E24D42",
           "id": 0,
           "pin": false,
           "type": "lucene"
+        },
+        "1": {
+          "id": 1,
+          "color": "#EAB839",
+          "query": "level:WARN",
+          "alias": "",
+          "pin": false
+        },
+        "2": {
+          "id": 2,
+          "color": "#7EB26D",
+          "query": "level:INFO",
+          "alias": "",
+          "pin": false
+        },
+        "3": {
+          "id": 3,
+          "color": "#6ED0E0",
+          "query": "level:DEBUG",
+          "alias": "",
+          "pin": false
         }
       },
       "ids": [
-        0
+        0,
+        1,
+        2,
+        3
       ]
     },
     "filter": {
@@ -33,10 +54,12 @@
       ],
       "list": {
         "0": {
-          "from": "2015-05-27T07:01:16.000Z",
-          "to": "2015-07-16T02:31:21.000Z",
+          "from": "NOW/YEAR-5YEAR",
+          "to": "NOW/YEAR%2B1YEAR",
           "field": "date",
           "type": "time",
+          "fromDateObj": "2010-07-27T21:34:48.566Z",
+          "toDateObj": "2015-07-27T21:34:48.567Z",
           "mandate": "must",
           "active": true,
           "alias": "",
@@ -49,6 +72,27 @@
     }
   },
   "rows": [
+    {
+      "title": "Help",
+      "height": "150px",
+      "editable": true,
+      "collapse": true,
+      "collapsable": true,
+      "panels": [
+        {
+          "error": false,
+          "span": 12,
+          "editable": true,
+          "type": "text",
+          "loadingEditor": false,
+          "status": "Stable",
+          "mode": "markdown",
+          "content": "### Cassandra System.log Overview\n\nThis dashboard gives an overview of the events in your system.log, broken down in various ways and plotted over time.\n\n#### Search Parameters\n\nIn the first row, you can select the time window and the search terms. Terms have already been entered to color code the events based on severity level. The third panel shows how many results have been found.\n\n#### Filtering\n\nThe second row allows you to control the filters applied to the dashboard. The left panel shows the filters that have already been applied to the dashboard. To remove a previously applied filter, click the x on the box representing the filter. The right panel allows you to choose a specific log file or host. The number of events in each log and for each host are shown, allowing you to zero in on trouble spots.\n\n#### Event Counts\n\nThe third row is a time-series histogram that shows the number of events that occurred within a specific time window. You can use this to identify active periods in the log. This view also allows you to drag over a specific time period to zoom in on that period. All the other graphs will adjust to show only events within that time period.\n\n#### Breakdown Charts\n\nThe next two rows show bar charts breaking down the severity level, source file, thread, source file, event type, and event category of each event. You can click on any bar to filter for that value. \n\n#### Data Table\n\nFinally, the table at the bottom shows the level, date, thread, and message for each event. You can click on a row to view full details about the event. \n\nEach event has the following fields:\n\n- id: a time-based UUID uniquely identifying the event\n- log_file: the log file that the events are from\n- log_line: the line number that the event occurs on in the log\n- host: the host that the events are from\n- level: the severity of the event (From most to least severe: ERROR, WARN, INFO, DEBUG)\n- date: the date and time the event occurred\n- thread: the thread that generated the event\n- source_file: the source file that logged the event\n- source_line: the line of code where the event was logged\n- message: the detailed message logged by the event\n- exception: an optional exception that triggered the event\n\nDynamic fields specific to a particular type of event are prefixed with a letter indicating their type:\n\n- s_ for string\n- i_ for integer (64-bit)\n- f_ for floating point (64-bit)\n- d_ for date\n- b_ for boolean\n- l_ for a newline-delimited list of strings\n\nYou can also click on a heading to sort by a specific field. By default the table is sorted by date in descending order.",
+          "style": {},
+          "title": "Help"
+        }
+      ]
+    },
     {
       "title": "Query and Time Window",
       "height": "50px",
@@ -77,7 +121,7 @@
             "1y",
             "5y"
           ],
-          "timespan": "90d",
+          "timespan": "5y",
           "timefield": "date",
           "timeformat": "",
           "refresh": {
@@ -89,8 +133,8 @@
           "spyable": true,
           "title": "Time Window",
           "time": {
-            "from": "05/27/2015 03:01:16",
-            "to": "07/15/2015 22:31:21"
+            "from": "07/27/2010 17:34:48",
+            "to": "07/27/2015 17:34:48"
           }
         },
         {
@@ -103,14 +147,16 @@
           "type": "query",
           "label": "Search",
           "history": [
-            "*:*",
-            "message:SparkWorker*",
-            "message:SparkMaster*",
-            "message:zendesk.tickets",
-            "level:ERROR",
+            "level:DEBUG",
             "level:INFO",
             "level:WARN",
-            "level:DEBUG"
+            "level:ERROR",
+            "*:*",
+            "event_type:unknown",
+            "message:\"Load of settings\"",
+            "event_type:repair*",
+            "message:SparkWorker*",
+            "message:SparkMaster*"
           ],
           "remember": 10,
           "pinned": true,
@@ -127,9 +173,12 @@
           "queries": {
             "mode": "all",
             "ids": [
-              0
+              0,
+              1,
+              2,
+              3
             ],
-            "query": "q=*%3A*&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]&wt=json&rows=0\n",
+            "query": "q=level%3AERROR&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\nq=level%3AWARN&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\nq=level%3AINFO&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\nq=level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&wt=json&rows=0\n",
             "basic_query": "",
             "custom": ""
           },
@@ -152,18 +201,56 @@
       "title": "Filters",
       "height": "50px",
       "editable": true,
-      "collapse": false,
+      "collapse": true,
       "collapsable": true,
       "panels": [
         {
           "error": false,
-          "span": 12,
+          "span": 8,
           "editable": true,
           "spyable": true,
           "group": [
             "default"
           ],
           "type": "filtering"
+        },
+        {
+          "span": 4,
+          "editable": true,
+          "type": "facet",
+          "loadingEditor": false,
+          "status": "Stable",
+          "queries": {
+            "mode": "all",
+            "ids": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=log_file&facet.field=host&wt=json",
+            "basic_query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=log_file&facet.field=host",
+            "custom": ""
+          },
+          "group": "default",
+          "style": {
+            "font-size": "9pt"
+          },
+          "overflow": "min-height",
+          "fields": [
+            "log_file",
+            "host"
+          ],
+          "field_list": true,
+          "spyable": true,
+          "facet_limit": 10,
+          "foundResults": true,
+          "header_title": "Limit Your Search",
+          "toggle_element": null,
+          "show_queries": true,
+          "title": "Facets",
+          "offset": 0,
+          "exportSize": null
         }
       ]
     },
@@ -184,9 +271,12 @@
           "queries": {
             "mode": "all",
             "ids": [
-              0
+              0,
+              1,
+              2,
+              3
             ],
-            "query": "q=*%3A*&wt=json&rows=0&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]&facet=true&facet.range=date&facet.range.start=2015-05-27T07:01:16.000Z&facet.range.end=2015-07-16T02:31:21.000Z&facet.range.gap=%2B12HOUR\n",
+            "query": "q=level%3AERROR&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\nq=level%3AWARN&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\nq=level%3AINFO&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\nq=level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.range=date&facet.range.start=NOW/YEAR-5YEAR&facet.range.end=NOW/YEAR%2B1YEAR&facet.range.gap=%2B7DAY\n",
             "custom": ""
           },
           "max_rows": 100000,
@@ -194,7 +284,7 @@
           "group_field": null,
           "auto_int": true,
           "resolution": 100,
-          "interval": "12h",
+          "interval": "7d",
           "intervals": [
             "auto",
             "1s",
@@ -243,16 +333,19 @@
       "collapsable": true,
       "panels": [
         {
-          "span": 3,
+          "span": 4,
           "editable": true,
           "type": "terms",
           "loadingEditor": false,
           "queries": {
             "mode": "all",
             "ids": [
-              0
+              0,
+              1,
+              2,
+              3
             ],
-            "query": "q=*%3A*&wt=json&rows=0&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]&facet=true&facet.field=level&facet.limit=10&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=level&facet.limit=10&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -338,16 +431,19 @@
           "title": "Level"
         },
         {
-          "span": 3,
+          "span": 4,
           "editable": true,
           "type": "terms",
           "loadingEditor": false,
           "queries": {
             "mode": "all",
             "ids": [
-              0
+              0,
+              1,
+              2,
+              3
             ],
-            "query": "q=*%3A*&wt=json&rows=0&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]&facet=true&facet.field=source_file&facet.limit=20&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=source_file&facet.limit=20&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -369,7 +465,7 @@
           "arrangement": "horizontal",
           "chart": "bar",
           "counter_pos": "below",
-          "lastColor": "rgb(226,77,66)",
+          "lastColor": "rgb(112,93,160)",
           "spyable": true,
           "show_queries": true,
           "chartColors": [
@@ -433,16 +529,19 @@
           "title": "Source File"
         },
         {
-          "span": 3,
+          "span": 4,
           "editable": true,
           "type": "terms",
           "loadingEditor": false,
           "queries": {
             "mode": "all",
             "ids": [
-              0
+              0,
+              1,
+              2,
+              3
             ],
-            "query": "q=*%3A*&wt=json&rows=0&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]&facet=true&facet.field=thread_name&facet.limit=20&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=thread_name&facet.limit=20&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -464,7 +563,7 @@
           "arrangement": "horizontal",
           "chart": "bar",
           "counter_pos": "below",
-          "lastColor": "rgb(110,208,224)",
+          "lastColor": "rgb(234,184,57)",
           "spyable": true,
           "show_queries": true,
           "chartColors": [
@@ -526,18 +625,128 @@
             "#DEDAF7"
           ],
           "title": "Thread"
-        },
+        }
+      ]
+    },
+    {
+      "title": "Even",
+      "height": "300px",
+      "editable": true,
+      "collapse": false,
+      "collapsable": true,
+      "panels": [
         {
-          "span": 3,
+          "span": 4,
           "editable": true,
           "type": "terms",
           "loadingEditor": false,
           "queries": {
             "mode": "all",
             "ids": [
-              0
+              0,
+              1,
+              2,
+              3
             ],
-            "query": "q=*%3A*&wt=json&rows=0&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]&facet=true&facet.field=event_type&facet.limit=20&facet.missing=true",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=log_file&facet.limit=10&facet.missing=true",
+            "custom": ""
+          },
+          "mode": "count",
+          "field": "log_file",
+          "stats_field": "",
+          "decimal_points": 0,
+          "exclude": [],
+          "missing": false,
+          "other": false,
+          "size": 10,
+          "order": "descending",
+          "style": {
+            "font-size": "10pt"
+          },
+          "donut": false,
+          "tilt": false,
+          "labels": true,
+          "logAxis": false,
+          "arrangement": "horizontal",
+          "chart": "bar",
+          "counter_pos": "below",
+          "lastColor": "",
+          "spyable": true,
+          "show_queries": true,
+          "chartColors": [
+            "#7EB26D",
+            "#EAB839",
+            "#6ED0E0",
+            "#EF843C",
+            "#E24D42",
+            "#1F78C1",
+            "#BA43A9",
+            "#705DA0",
+            "#508642",
+            "#CCA300",
+            "#447EBC",
+            "#C15C17",
+            "#890F02",
+            "#0A437C",
+            "#6D1F62",
+            "#584477",
+            "#B7DBAB",
+            "#F4D598",
+            "#70DBED",
+            "#F9BA8F",
+            "#F29191",
+            "#82B5D8",
+            "#E5A8E2",
+            "#AEA2E0",
+            "#629E51",
+            "#E5AC0E",
+            "#64B0C8",
+            "#E0752D",
+            "#BF1B00",
+            "#0A50A1",
+            "#962D82",
+            "#614D93",
+            "#9AC48A",
+            "#F2C96D",
+            "#65C5DB",
+            "#F9934E",
+            "#EA6460",
+            "#5195CE",
+            "#D683CE",
+            "#806EB7",
+            "#3F6833",
+            "#967302",
+            "#2F575E",
+            "#99440A",
+            "#58140C",
+            "#052B51",
+            "#511749",
+            "#3F2B5B",
+            "#E0F9D7",
+            "#FCEACA",
+            "#CFFAFF",
+            "#F9E2D2",
+            "#FCE2DE",
+            "#BADFF4",
+            "#F9D9F9",
+            "#DEDAF7"
+          ],
+          "title": "File"
+        },
+        {
+          "span": 4,
+          "editable": true,
+          "type": "terms",
+          "loadingEditor": false,
+          "queries": {
+            "mode": "all",
+            "ids": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=event_type&facet.limit=20&facet.missing=true",
             "custom": ""
           },
           "mode": "count",
@@ -559,7 +768,7 @@
           "arrangement": "horizontal",
           "chart": "bar",
           "counter_pos": "below",
-          "lastColor": "rgb(80,134,66)",
+          "lastColor": "rgb(239,132,60)",
           "spyable": true,
           "show_queries": true,
           "chartColors": [
@@ -621,6 +830,104 @@
             "#DEDAF7"
           ],
           "title": "Event Type"
+        },
+        {
+          "span": 4,
+          "editable": true,
+          "type": "terms",
+          "loadingEditor": false,
+          "queries": {
+            "mode": "all",
+            "ids": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&wt=json&rows=0&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&facet=true&facet.field=event_category&facet.limit=10&facet.missing=true",
+            "custom": ""
+          },
+          "mode": "count",
+          "field": "event_category",
+          "stats_field": "",
+          "decimal_points": 0,
+          "exclude": [],
+          "missing": false,
+          "other": false,
+          "size": 10,
+          "order": "descending",
+          "style": {
+            "font-size": "10pt"
+          },
+          "donut": false,
+          "tilt": false,
+          "labels": true,
+          "logAxis": false,
+          "arrangement": "horizontal",
+          "chart": "bar",
+          "counter_pos": "below",
+          "lastColor": "",
+          "spyable": true,
+          "show_queries": true,
+          "chartColors": [
+            "#7EB26D",
+            "#EAB839",
+            "#6ED0E0",
+            "#EF843C",
+            "#E24D42",
+            "#1F78C1",
+            "#BA43A9",
+            "#705DA0",
+            "#508642",
+            "#CCA300",
+            "#447EBC",
+            "#C15C17",
+            "#890F02",
+            "#0A437C",
+            "#6D1F62",
+            "#584477",
+            "#B7DBAB",
+            "#F4D598",
+            "#70DBED",
+            "#F9BA8F",
+            "#F29191",
+            "#82B5D8",
+            "#E5A8E2",
+            "#AEA2E0",
+            "#629E51",
+            "#E5AC0E",
+            "#64B0C8",
+            "#E0752D",
+            "#BF1B00",
+            "#0A50A1",
+            "#962D82",
+            "#614D93",
+            "#9AC48A",
+            "#F2C96D",
+            "#65C5DB",
+            "#F9934E",
+            "#EA6460",
+            "#5195CE",
+            "#D683CE",
+            "#806EB7",
+            "#3F6833",
+            "#967302",
+            "#2F575E",
+            "#99440A",
+            "#58140C",
+            "#052B51",
+            "#511749",
+            "#3F2B5B",
+            "#E0F9D7",
+            "#FCEACA",
+            "#CFFAFF",
+            "#F9E2D2",
+            "#FCE2DE",
+            "#BADFF4",
+            "#F9D9F9",
+            "#DEDAF7"
+          ],
+          "title": "Event Category"
         }
       ]
     },
@@ -640,16 +947,22 @@
           "queries": {
             "mode": "all",
             "ids": [
-              0
+              0,
+              1,
+              2,
+              3
             ],
-            "query": "q=*%3A*&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]&wt=json&rows=500",
-            "basic_query": "q=*%3A*&fq=date:[2015-05-27T07:01:16.000Z%20TO%202015-07-16T02:31:21.000Z]",
+            "query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&sort=date desc&wt=json&rows=500",
+            "basic_query": "q=level%3AERROR OR level%3AWARN OR level%3AINFO OR level%3ADEBUG&fq=date:[NOW/YEAR-5YEAR%20TO%20NOW/YEAR%2B1YEAR]&sort=date desc",
             "custom": ""
           },
           "size": 100,
           "pages": 5,
           "offset": 0,
-          "sort": [],
+          "sort": [
+            "date",
+            "desc"
+          ],
           "group": "default",
           "style": {
             "font-size": "9pt"
@@ -664,10 +977,10 @@
             "message"
           ],
           "highlight": [],
-          "sortable": false,
+          "sortable": true,
           "header": true,
           "paging": true,
-          "field_list": true,
+          "field_list": false,
           "trimFactor": 300,
           "normTimes": true,
           "spyable": true,
@@ -786,7 +1099,6 @@
     "core_list": [
       "banana.int",
       "logparse.systemlog",
-      "logstash.system_log",
       "zendesk.organizations",
       "zendesk.ticket_comments",
       "zendesk.ticket_events",
