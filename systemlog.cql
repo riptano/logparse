@@ -22,5 +22,5 @@ create table logparse.systemlog (
 	i_ map<text, bigint>,
 	f_ map<text, double>,
 	s_ map<text, text>,
-	l_ map<text, text>,
+	l_ map<text, text>
 ) ;
