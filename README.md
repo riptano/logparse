@@ -30,7 +30,7 @@ as dynamic fields when the table is indexed in DSE's implementation of Solr.
 
 The [cassandra_store.py](cassandra_store.py) file contains the code to save the log data into Cassandra.
 It requires the [DataStax Python Driver](https://github.com/datastax/python-driver).
-It should be installed by running `pip install cassandra`. The script currently assumes
+It should be installed by running `pip install cassandra-driver`. The script currently assumes
 that Cassandra is running on `localhost` on the default CQL port 9042.
 
 ## Solr indexing
