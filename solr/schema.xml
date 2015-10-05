@@ -39,6 +39,7 @@
     <field name="source_file" type="string" indexed="true" stored="true"/>
     <field name="source_line" type="long" indexed="true" stored="true"/>
     <field name="message" type="text" indexed="true" stored="true"/>
+    <field name="event_product" type="string" indexed="true" stored="true"/>
     <field name="event_category" type="string" indexed="true" stored="true"/>
     <field name="event_type" type="string" indexed="true" stored="true"/>
     <field name="exception" type="text" indexed="true" stored="true"/>
