@@ -18,7 +18,7 @@
     </fieldType>
     <fieldType name="string" class="solr.StrField" multiValued="false" docValues="true"/>
     <fieldType name="int" class="solr.TrieIntField" multiValued="false" docValues="true"/>
-    <fieldType name="date" class="solr.TrieDateField" multiValued="false" docValues="true"/>
+    <fieldType name="date" class="solr.TrieDateField" multiValued="false"/>
     <fieldType name="float" class="solr.TrieFloatField" multiValued="false" docValues="true"/>
     <fieldType name="double" class="solr.TrieDoubleField" multiValued="false" docValues="true"/>
     <fieldType name="long" class="solr.TrieLongField" multiValued="false" docValues="true"/>
