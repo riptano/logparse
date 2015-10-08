@@ -16,15 +16,14 @@
         <tokenizer class="solr.PatternTokenizerFactory" pattern="\n"/>
       </analyzer>
     </fieldType>
-    <fieldType name="string" class="solr.StrField" multiValued="false"/>
-    <fieldType name="int" class="solr.TrieIntField" multiValued="false"/>
-    <fieldType name="date" class="solr.TrieDateField" multiValued="false"/>
-    <fieldType name="float" class="solr.TrieFloatField" multiValued="false"/>
-    <fieldType name="double" class="solr.TrieDoubleField" multiValued="false"/>
-    <fieldType name="long" class="solr.TrieLongField" multiValued="false"/>
-    <fieldType name="binary" class="solr.BinaryField" multiValued="false"/>
+    <fieldType name="string" class="solr.StrField" multiValued="false" docValues="true"/>
+    <fieldType name="int" class="solr.TrieIntField" multiValued="false" docValues="true"/>
+    <fieldType name="date" class="solr.TrieDateField" multiValued="false" docValues="true"/>
+    <fieldType name="float" class="solr.TrieFloatField" multiValued="false" docValues="true"/>
+    <fieldType name="double" class="solr.TrieDoubleField" multiValued="false" docValues="true"/>
+    <fieldType name="long" class="solr.TrieLongField" multiValued="false" docValues="true"/>
     <fieldType name="bool" class="solr.BoolField" multiValued="false"/>
-    <fieldType name="uuid" class="solr.UUIDField" multiValued="false"/>
+    <fieldType name="uuid" class="solr.UUIDField" multiValued="false" docValues="true"/>
   </types>
   <fields>
     <field name="id" type="uuid" indexed="true" stored="true"/>
