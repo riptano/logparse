@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import sys
 import socket
 import fileinput
 
@@ -10,8 +9,11 @@ cassandra = CassandraStore()
 
 hostname = socket.gethostname()
 log = fileinput.input()
-for event in systemlog.parse_log(log):
-    event['host'] = hostname
-    event['log_file'] = fileinput.filename()
-    event['log_line'] = fileinput.lineno()
-    cassandra.insert_generic('systemlog', event)
+#for event in systemlog.parse_log(log):
+#    event['host'] = hostname
+#    event['log_file'] = fileinput.filename()
+#    event['log_line'] = fileinput.lineno()
+#    cassandra.insert('systemlog', event)
+
+for error in cassandra.slurp('systemlog', systemlog.parse_log(log)):
+    print error
