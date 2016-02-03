@@ -1,0 +1,81 @@
+#!/usr/bin/env python
+import sys
+import fileinput
+from collections import defaultdict
+from getopt import getopt, GetoptError
+
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import numpy as np
+import systemlog
+
+try:
+    (options, arguments) = getopt(sys.argv[1:], 'i:s:e',
+                                    ['interval', 'scale', 'events'])
+except GetoptError, error:
+    sys.stderr.write('%s\n' % str(error))
+    sys.exit(1)
+
+# dirty, but I'm not rewriting fileinput.input
+sys.argv = [sys.argv[0]]
+
+interval = 3600
+scale = 10
+allevents = False
+for opt, arg in options:
+    if opt in ('-i', '--interval'):
+        interval = int(arg)
+    if opt in ('-s', '--scale'):
+        scale = int(arg)
+    if opt in ('-e', '--events'):
+        allevents = True
+
+if arguments:
+    log = fileinput.input(arguments[0])
+else:
+    log = fileinput.input()
+
+stages = {}
+data = defaultdict(lambda: defaultdict(int))
+enum = 0
+for event in systemlog.parse_log(log):
+    stage = event['thread_name'] + ' ' + event['source_file']
+    if stage[0:3].isupper(): # skip rmi, handshaking, streams, etc
+        continue
+    if event['event_type'] == 'messages_dropped':
+        stage = event['message_type'] + ' dropped'
+    elif event['event_type'] == 'begin_flush':
+        stage = 'flushed bytes (serialized)'
+    elif allevents:
+        stage = ' '.join((event['event_category'], event['event_type'], stage))
+
+    if stage not in stages:
+        stages[stage] = enum
+        enum += 1
+    ts = int(event['date'].strftime('%s')) / interval
+    if event['event_type'] == 'pause':
+        data[ts][stage] += event['duration'] / 1000
+    elif event['event_type'] == 'messages_dropped':
+        data[ts][stage] += event['messages_dropped']
+    elif event['event_type'] == 'begin_flush' and event['serialized_bytes'] != None:
+        data[ts][stage] += (event['serialized_bytes'] / 1024**2 / scale)
+    else:
+        data[ts][stage] += 1
+
+fig, ax = plt.subplots()
+colors = cm.rainbow(np.linspace(0, 1, len(stages)))
+for ts, info in data.iteritems():
+    for i, stage in enumerate(sorted(info.keys())):
+        ax.scatter(ts, stages[stage], s=info[stage]*scale, c=colors[stages[stage]], alpha=0.5)
+
+plt.yticks(stages.values(), stages.keys())
+
+ax.set_xlabel('Time (%s second buckets)' % interval, fontsize=20)
+ax.set_ylabel('Stage', fontsize=20)
+
+ax.grid(True)
+
+plt.plot()
+fig.tight_layout()
+plt.subplots_adjust(left=0.21)
+plt.show()
