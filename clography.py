@@ -75,6 +75,10 @@ for event in systemlog.parse_log(log):
         data[ts][stage] += (event['serialized_bytes'] / 1024**2 / scale)
     elif event['event_type'] in ('incremental_compaction', 'large_partition'):
         data[ts][stage] += event['partition_size'] / 1024**2 / scale
+    elif event['event_type'] == 'begin_compaction':
+        data[ts][stage] += len(event['input_sstables'])
+    elif event['event_type'] == 'end_compaction':
+        data[ts][stage] += event['output_bytes'] / 1024**2 / scale
     else:
         data[ts][stage] += 1
 
