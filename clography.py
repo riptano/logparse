@@ -10,8 +10,8 @@ import numpy as np
 import systemlog
 
 try:
-    (options, arguments) = getopt(sys.argv[1:], 'i:s:e',
-                                    ['interval', 'scale', 'events'])
+    (options, arguments) = getopt(sys.argv[1:], 'i:s:etu',
+                                    ['interval', 'scale', 'events', 'events-only', 'show-unknown'])
 except GetoptError, error:
     sys.stderr.write('%s\n' % str(error))
     sys.exit(1)
@@ -22,6 +22,8 @@ sys.argv = [sys.argv[0]]
 interval = 3600
 scale = 10
 allevents = False
+eventsonly = False
+unknowns = False
 for opt, arg in options:
     if opt in ('-i', '--interval'):
         interval = int(arg)
@@ -29,6 +31,10 @@ for opt, arg in options:
         scale = int(arg)
     if opt in ('-e', '--events'):
         allevents = True
+    if opt in ('-t', '--events-only'):
+        eventsonly = True
+    if opt in ('-u', '--show-unknown'):
+        unknowns = True
 
 if arguments:
     log = fileinput.input(arguments[0])
@@ -40,14 +46,19 @@ data = defaultdict(lambda: defaultdict(int))
 enum = 0
 for event in systemlog.parse_log(log):
     stage = event['thread_name'] + ' ' + event['source_file']
-    if stage[0:3].isupper(): # skip rmi, handshaking, streams, etc
+    if stage[0:3].isupper() or event['thread_name'] == 'main': # skip rmi, handshaking, streams, etc
+        continue
+    if event['event_type'] == 'unknown' and not unknowns:
         continue
     if event['event_type'] == 'messages_dropped':
         stage = event['message_type'] + ' dropped'
     elif event['event_type'] == 'begin_flush':
         stage = 'flushed bytes (serialized)'
     elif allevents:
-        stage = ' '.join((event['event_category'], event['event_type'], stage))
+        if not eventsonly:
+            stage = ' '.join((event['event_category'], event['event_type'], stage))
+        else:
+            stage = event['event_category'] + ' ' +event['event_type'] 
 
     if stage not in stages:
         stages[stage] = enum
@@ -56,7 +67,10 @@ for event in systemlog.parse_log(log):
     if event['event_type'] == 'pause':
         data[ts][stage] += event['duration'] / 1000
     elif event['event_type'] == 'messages_dropped':
-        data[ts][stage] += event['messages_dropped']
+        if 'internal_timeout' in event:
+            data[ts][stage] += event['internal_timeout'] + event['cross_node_timeout']
+        else:
+            data[ts][stage] += event['messages_dropped']
     elif event['event_type'] == 'begin_flush' and event['serialized_bytes'] != None:
         data[ts][stage] += (event['serialized_bytes'] / 1024**2 / scale)
     else:
@@ -71,11 +85,20 @@ for ts, info in data.iteritems():
 plt.yticks(stages.values(), stages.keys())
 
 ax.set_xlabel('Time (%s second buckets)' % interval, fontsize=20)
-ax.set_ylabel('Stage', fontsize=20)
+if not eventsonly:
+    ax.set_ylabel('Stage', fontsize=20)
+else:
+    ax.set_ylabel('Event', fontsize=20)
 
 ax.grid(True)
 
 plt.plot()
-fig.tight_layout()
+try:
+    fig.tight_layout()
+except ValueError: # too many things on the Y axis
+    fig.subplots_adjust(bottom = 0)
+    fig.subplots_adjust(top = 1)
+    fig.subplots_adjust(right = 1)
+    fig.subplots_adjust(left = 0)
 plt.subplots_adjust(left=0.21)
 plt.show()
