@@ -28,7 +28,7 @@ for opt, arg in options:
     if opt in ('-i', '--interval'):
         interval = int(arg)
     if opt in ('-s', '--scale'):
-        scale = int(arg)
+        scale = float(arg)
     if opt in ('-e', '--events'):
         allevents = True
     if opt in ('-t', '--events-only'):
