@@ -124,6 +124,12 @@ capture_message = switch((
             capture(r'The following nodes seems to be down: \[(?P<endpoints>[^\]]*)\]. Some Cassandra operations may fail with UnavailableException.'),
             update(event_product='dse', event_category='gossip', event_type='down_nodes_warning')),
 
+    case('CqlSlowLogWriter'),
+        rule(
+            capture(r'Recording statements with duration of (?P<duration>[0-9]+) in slow log'),
+            convert(int, 'duration'),
+            update(event_product='dse', event_category='cql', event_type='slow_query')),
+
     case('GCInspector'), 
 
         rule(
@@ -139,6 +145,11 @@ capture_message = switch((
         rule(
             capture(r'(?P<gc_type>[A-Za-z]*) GC in (?P<duration>[0-9]*)ms. (( CMS)? Old Gen: (?P<oldgen_before>[0-9]*) -> (?P<oldgen_after>[0-9]*);)?( Code Cache: (?P<codecache_before>[0-9]*) -> (?P<codecache_after>[0-9]*);)?( Compressed Class Space: (?P<compressed_class_before>[0-9]*) -> (?P<compressed_class_after>[0-9]*);)?( CMS Perm Gen: (?P<permgen_before>[0-9]*) -> (?P<permgen_after>[0-9]*);)?( Metaspace: (?P<metaspace_before>[0-9]*) -> (?P<metaspace_after>[0-9]*);)?( Par Eden Space: (?P<eden_before>[0-9]*) -> (?P<eden_after>[0-9]*);)?( Par Survivor Space: (?P<survivor_before>[0-9]*) -> (?P<survivor_after>[0-9]*))?'),
             convert(int, 'duration', 'oldgen_before', 'oldgen_after', 'permgen_before', 'permgen_after', 'codecache_before', 'codecache_after', 'compressed_class_before', 'compressed_class_after', 'metaspace_before', 'metaspace_after', 'eden_before', 'eden_after', 'survivor_before', 'survivor_after'),
+            update(event_product='cassandra', event_category='garbage_collection', event_type='pause')),
+
+        rule(
+            capture(r'(?P<gc_type>.+) Generation GC in (?P<duration>[0-9]+)ms.  (Compressed Class Space: (?P<compressed_class_before>[0-9]+) -> (?P<compressed_class_after>[0-9]+);)?.((.+) Eden Space: (?P<eden_before>[0-9]+) -> (?P<eden_after>[0-9]+);)?.((.+) Old Gen: (?P<oldgen_before>[0-9]+) -> (?P<oldgen_after>[0-9]+);)?.((.+) Survivor Space: (?P<survivor_before>[0-9]+) -> (?P<survivor_after>[0-9]+);)?.(Metaspace: (?P<metaspace_before>[0-9]+) -> (?P<metaspace_after>[0-9]+))?'),
+            convert(int, 'duration', 'oldgen_before', 'oldgen_after', 'permgen_before', 'permgen_after', 'compressed_class_before', 'compressed_class_after', 'metaspace_before', 'metaspace_after', 'eden_before', 'eden_after', 'survivor_before', 'survivor_after'),
             update(event_product='cassandra', event_category='garbage_collection', event_type='pause')),
 
     case('ColumnFamilyStore'),
@@ -159,8 +170,8 @@ capture_message = switch((
             update(event_product='cassandra', event_category='compaction', event_type='cancellation_failed')),
 
         rule(
-            capture(r"Flushing largest CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) to free up room. Used total: (?P<used_on_heap>[0-9]*)/(?P<used_off_heap>[0-9]*), live: (?P<live_on_heap>[0-9]*)/(?P<live_off_heap>[0-9]*), flushing: (?P<flushing_on_heap>[0-9]*)/(?P<flushing_off_heap>[0-9]*), this: (?P<this_on_heap>[0-9]*)/(?P<this_off_heap>[0-9]*)"),
-            convert(int, 'used_on_heap', 'used_off_heap', 'live_on_heap', 'live_off_heap', 'flushing_on_heap', 'flushing_off_heap', 'this_on_heap', 'this_off_heap'),
+            capture(r"Flushing largest CFS\(Keyspace='(?P<keyspace>[^']*)', ColumnFamily='(?P<table>[^']*)'\) to free up room. Used total: (?P<used_on_heap>\d+\.\d+)/(?P<used_off_heap>\d+\.\d+), live: (?P<live_on_heap>\d+\.\d+)/(?P<live_off_heap>\d+\.\d+), flushing: (?P<flushing_on_heap>\d+\.\d+)/(?P<flushing_off_heap>\d+\.\d+), this: (?P<this_on_heap>\d+\.\d+)/(?P<this_off_heap>\d+\.\d+)"),
+            convert(float, 'used_on_heap', 'used_off_heap', 'live_on_heap', 'live_off_heap', 'flushing_on_heap', 'flushing_off_heap', 'this_on_heap', 'this_off_heap'),
             update(event_product='cassandra', event_category='memtable', event_type='flush_largest')),
         
         rule(
@@ -241,6 +252,14 @@ capture_message = switch((
             capture(r'Compacting large (partition|row) (?P<keyspace>[^/]*)/(?P<table>[^:]*):(?P<partition_key>.*) \((?P<partition_size>[0-9]*) bytes\) incrementally'),
             convert(int, 'partition_size'),
             update(event_product='cassandra', event_category='compaction', event_type='incremental')),
+
+    case('SSTableWriter'),
+        
+        rule(
+            capture(r'Compacting large partition (?P<keyspace>.+)/(?P<table>.+):(?P<partition_key>.+) \((?P<partition_size>\d+) bytes\)'),
+            convert(int, 'partition_size'),
+            update(event_product='cassandra', event_category='compaction', event_type='incremental')),
+
 
     case('Differencer', 'AntiEntropyService'),
 
@@ -969,7 +988,12 @@ capture_message = switch((
             capture(r'(?P<leader_manager>[^:]*): new listener for (?P<dc_army>[^ ]*) initialized to (?P<listener>.*)'),
             update(event_product='dse', event_category='jobtracker', event_type='new_listener')),
 
-    case('ExternalLogger', 'SparkWorker-0 ExternalLogger'),
+        rule(
+            capture(r'Local query timed out.+'),
+            update(event_product='dse', event_category='jobtracker', event_type='timeout')),
+
+
+    case('ExternalLogger', 'ExternalLogger SparkWorker-0'),
 
         rule(
             capture(r'.*'),
@@ -997,6 +1021,12 @@ capture_message = switch((
                 r'Spark Master not ready( yet)? at \(no configured master\)'),
             convert(int, 'master_port'),
             update(event_product='spark', event_category='master', event_type='master_not_ready')),
+
+    case('AbstractConnector'),
+        rule(
+            capture(r'Started SelectChannelConnector@(?P<ip>.+):(?P<port>.+)'),
+            convert(int, 'port'),
+            update(event_product='spark', event_category='master', event_type='listening')),
 
     case('AbstractSparkRunner'),
 
@@ -1228,6 +1258,15 @@ capture_message = switch((
             capture(r'reading saved cache (?P<cache_file>.*)'),
             update(event_product='cassandra', event_category='cache', event_type='read')),
 
+        rule(
+            capture(r'Harmless error reading saved cache.*'),
+            update(event_product='cassandra', event_category='cache', event_type='read_error')),
+
+        rule(
+            capture(r'Completed loading \((?P<load_duration>[0-9]*) ms; (?P<cache_items>[0-9]*) keys\) KeyCache cache'),
+            convert(int, 'load_duration', 'cache_items'),
+            update(event_product='cassandra', event_category='cache', event_type='loaded')),
+
     case('CacheService'),
 
         rule(
@@ -1250,6 +1289,10 @@ capture_message = switch((
         rule(
             capture(r"Drop Keyspace '(?P<keyspace>[^']*)'"),
             update(event_product='cassandra', event_category='migration', event_type='drop_keyspace')),
+
+        rule(
+            capture(r"Drop ColumnFamily '(?P<keyspace>.+)/(?P<table>.+)'"),
+            update(event_product='cassandra', event_category='migration', event_type='drop_table')),
 
         rule(
             capture(r"Update ColumnFamily '(?P<keyspace>[^/]*)/(?P<table>[^']*)' From org.apache.cassandra.config.CFMetaData@(?P<old_hash>[^\]]*)\[(?P<old_metadata>.*)\] To org.apache.cassandra.config.CFMetaData@(?P<new_hash>[^\]]*)\[(?P<new_metadata>.*)\]"),
@@ -1379,8 +1422,13 @@ capture_message = switch((
     case('MessagingService'),
 
         rule(
-                capture(r'(?P<messages_dropped>[0-9]*) (?P<message_type>[^ ]*) messages dropped in last 5000ms(: (?P<internal_timeout>[0-9]*) for internal timeout and (?P<cross_node_timeout>[0-9]*) for cross node timeout)?'),
+            capture(r'(?P<messages_dropped>[0-9]*) (?P<message_type>[^ ]*) messages dropped in last 5000ms(: (?P<internal_timeout>[0-9]*) for internal timeout and (?P<cross_node_timeout>[0-9]*) for cross node timeout)?'),
             convert(int, 'messages_dropped', 'internal_timeout', 'cross_node_timeout'),
+            update(event_product='cassandra', event_category='status', event_type='messages_dropped')),
+
+        rule(
+            capture(r'(?P<message_type>[^ ]*) messages were dropped in last 5000 ms: (?P<internal_timeout>[0-9]*) for internal timeout and (?P<cross_node_timeout>[0-9]*) for cross node timeout'),
+            convert(int, 'internal_timeout', 'cross_node_timeout'),
             update(event_product='cassandra', event_category='status', event_type='messages_dropped')),
 
         rule(
