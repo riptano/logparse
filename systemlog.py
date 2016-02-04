@@ -258,7 +258,7 @@ capture_message = switch((
         rule(
             capture(r'Compacting large partition (?P<keyspace>.+)/(?P<table>.+):(?P<partition_key>.+) \((?P<partition_size>\d+) bytes\)'),
             convert(int, 'partition_size'),
-            update(event_product='cassandra', event_category='compaction', event_type='incremental')),
+            update(event_product='cassandra', event_category='compaction', event_type='large_partition')),
 
 
     case('Differencer', 'AntiEntropyService'),

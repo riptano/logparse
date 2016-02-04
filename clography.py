@@ -79,7 +79,7 @@ for event in systemlog.parse_log(log):
 fig, ax = plt.subplots()
 colors = cm.rainbow(np.linspace(0, 1, len(stages)))
 for ts, info in data.iteritems():
-    for stage in sorted(info.keys()):
+    for stage in info.keys():
         ax.scatter(ts, stages[stage], s=info[stage]*scale, c=colors[stages[stage]], alpha=0.5)
 
 plt.yticks(stages.values(), stages.keys())
