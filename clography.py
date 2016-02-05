@@ -86,7 +86,10 @@ fig, ax = plt.subplots()
 colors = cm.rainbow(np.linspace(0, 1, len(stages)))
 for ts, info in data.iteritems():
     for stage in info.keys():
-        ax.scatter(ts, stages[stage], s=info[stage]*scale, c=colors[stages[stage]], alpha=0.5)
+        size=info[stage]*scale
+        ax.scatter(ts, stages[stage], s=size, c=colors[stages[stage]], alpha=0.5)
+        if size > 700:
+            ax.scatter(ts, stages[stage], s=size*0.01, c='black', alpha=1, marker='_', lw=1)
 
 plt.yticks(stages.values(), stages.keys())
 
