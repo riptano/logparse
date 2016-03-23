@@ -120,7 +120,8 @@ plt.plot()
 try:
     fig.tight_layout()
 except ValueError: # too many things on the Y axis
-    fig.subplots_adjust(bottom = 0)
+    print "Warning, tight layout not possible, too many items on the Y axis"
+    fig.subplots_adjust(bottom = 0.2)
     fig.subplots_adjust(top = 1)
     fig.subplots_adjust(right = 1)
     fig.subplots_adjust(left = 0)
