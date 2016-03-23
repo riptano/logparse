@@ -10,8 +10,9 @@ import numpy as np
 import systemlog
 
 try:
-    (options, arguments) = getopt(sys.argv[1:], 'i:s:etu',
-                                    ['interval', 'scale', 'events', 'events-only', 'show-unknown'])
+    # I am bad at picking single-letter switches, and feel bad
+    (options, arguments) = getopt(sys.argv[1:], 'i:s:eturm:',
+                                    ['interval', 'scale', 'events', 'events-only', 'show-unknown', 'sort', 'min-size'])
 except GetoptError, error:
     sys.stderr.write('%s\n' % str(error))
     sys.exit(1)
@@ -24,6 +25,9 @@ scale = 10
 allevents = False
 eventsonly = False
 unknowns = False
+sort = False
+minsize = 0
+
 for opt, arg in options:
     if opt in ('-i', '--interval'):
         interval = int(arg)
@@ -35,15 +39,19 @@ for opt, arg in options:
         eventsonly = True
     if opt in ('-u', '--show-unknown'):
         unknowns = True
+    if opt in ('-r', '--sort'):
+        sort = True
+    if opt in ('-m', '--min-size'):
+        minsize = int(arg)
 
 if arguments:
     log = fileinput.input(arguments[0])
 else:
     log = fileinput.input()
 
-stages = {}
-data = defaultdict(lambda: defaultdict(int))
+stages = defaultdict(int)
 enum = 0
+data = defaultdict(lambda: defaultdict(int))
 for event in systemlog.parse_log(log):
     stage = event['thread_name'] + ' ' + event['source_file']
     if stage[0:3].isupper() or event['thread_name'] == 'main': # skip rmi, handshaking, streams, etc
@@ -60,14 +68,15 @@ for event in systemlog.parse_log(log):
         else:
             stage = event['event_category'] + ' ' +event['event_type'] 
 
-    if stage not in stages:
+    if not stage in stages and not sort: 
         stages[stage] = enum
         enum += 1
+
     ts = int(event['date'].strftime('%s')) / interval
     if event['event_type'] == 'pause':
         data[ts][stage] += event['duration'] / 1000
     elif event['event_type'] == 'messages_dropped':
-        if 'internal_timeout' in event:
+        if 'internal_timeout' in event and event['internal_timeout'] != None:
             data[ts][stage] += event['internal_timeout'] + event['cross_node_timeout']
         else:
             data[ts][stage] += event['messages_dropped']
@@ -82,6 +91,12 @@ for event in systemlog.parse_log(log):
     else:
         data[ts][stage] += 1
 
+if sort:
+    enum = 0
+    for stage in reversed(sorted(stages.keys())):
+        stages[stage] = enum
+        enum += 1
+    size=max(stages[stage]*scale, minsize)
 fig, ax = plt.subplots()
 colors = cm.rainbow(np.linspace(0, 1, len(stages)))
 for ts, info in data.iteritems():
